@@ -3,7 +3,29 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.db.models import Alert
+from app.db.neo4j import neo4j_client
 from app.services.risk import calculate_entity_risk
+
+
+def find_entity_cases(
+    entity_id: str,
+) -> list[int]:
+    query = """
+    MATCH (r:Record)--(n {entity_id: $entity_id})
+    RETURN DISTINCT r.case_id AS case_id
+    ORDER BY case_id
+    """
+
+    rows = neo4j_client.execute(
+        query,
+        entity_id=entity_id,
+    )
+
+    return [
+        int(row["case_id"])
+        for row in rows
+        if row.get("case_id") is not None
+    ]
 
 
 def create_alert_if_new(
@@ -72,19 +94,41 @@ def generate_risk_alerts(
 
         reason = "; ".join(reasons[:3])
 
-        alert = create_alert_if_new(
-            db,
-            alert_type=alert_type,
-            entity_id=entity_id,
-            case_id=None,
-            risk_level=level,
-            risk_score=score,
-            reason=reason,
-            confidence=confidence,
-        )
+        case_ids = find_entity_cases(entity_id)
 
-        if alert:
-            created.append(alert)
+        # If the entity exists in one or more cases,
+        # create a case-specific alert for each case.
+        if case_ids:
+            for case_id in case_ids:
+                alert = create_alert_if_new(
+                    db,
+                    alert_type=alert_type,
+                    entity_id=entity_id,
+                    case_id=case_id,
+                    risk_level=level,
+                    risk_score=score,
+                    reason=reason,
+                    confidence=confidence,
+                )
+
+                if alert:
+                    created.append(alert)
+
+        else:
+            # Keep the alert even if no case can be resolved.
+            alert = create_alert_if_new(
+                db,
+                alert_type=alert_type,
+                entity_id=entity_id,
+                case_id=None,
+                risk_level=level,
+                risk_score=score,
+                reason=reason,
+                confidence=confidence,
+            )
+
+            if alert:
+                created.append(alert)
 
     db.commit()
 
