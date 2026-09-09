@@ -40,3 +40,38 @@ class RawRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     case: Mapped[Case] = relationship(back_populates="records")
+
+class Alert(Base):
+    __tablename__ = "alerts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    alert_type: Mapped[str] = mapped_column(String(100), index=True)
+    entity_id: Mapped[str | None] = mapped_column(String(255), index=True, nullable=True)
+    case_id: Mapped[int | None] = mapped_column(
+        ForeignKey("cases.id"),
+        index=True,
+        nullable=True,
+    )
+
+    risk_level: Mapped[str] = mapped_column(String(20), default="MEDIUM")
+    risk_score: Mapped[int] = mapped_column(Integer, default=0)
+
+    reason: Mapped[str] = mapped_column(Text())
+    confidence: Mapped[float] = mapped_column(default=0.0)
+
+    status: Mapped[str] = mapped_column(
+        String(30),
+        default="NEW",
+        index=True,
+    )
+
+    assigned_to: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
