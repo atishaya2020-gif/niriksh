@@ -14,6 +14,7 @@ from app.api import (
     risk,
     alerts,
     network,
+    search,
 )
 
 from app.db.models import Base
@@ -103,6 +104,11 @@ app.include_router(
 
 app.include_router(
     network.router,
+    prefix="/api",
+)
+
+app.include_router(
+    search.router,
     prefix="/api",
 )
 
