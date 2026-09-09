@@ -82,7 +82,7 @@ class IngestionCaseScopingTests(unittest.TestCase):
         return handle.name
 
     def import_for_case(self, case):
-        with patch("app.services.ingestion.create_record_graph"):
+        with patch("app.services.ingestion.import_csv_batch"):
             summary = import_csv(self.db, case, self.fixture_path)
             return summary["records_imported"]
 

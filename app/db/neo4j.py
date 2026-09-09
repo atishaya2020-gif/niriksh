@@ -16,5 +16,11 @@ class Neo4jClient:
         with self.driver.session() as session:
             return session.run(query, **params).data()
 
+    def execute_write_batch(self, query: str, rows: list[dict]):
+        if not rows:
+            return
+        with self.driver.session() as session:
+            session.execute_write(lambda tx: tx.run(query, rows=rows).consume())
+
 
 neo4j_client = Neo4jClient()

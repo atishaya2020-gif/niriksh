@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 import pandas as pd
 
 from app.db.models import Case, RawRecord
-from app.services.graph_service import create_record_graph
+from app.services.graph_service import import_csv_batch
 from app.services.normalization import clean_text, parse_datetime
 
 EXPECTED_DROP_COLUMNS = {"Unnamed: 12"}
@@ -57,13 +57,12 @@ def import_csv(db: Session, case: Case, path: str) -> dict:
 
     db.commit()
 
-    for row in imported_rows:
-        record_id = clean_text(row.get("record_id"))
+    if imported_rows:
         try:
-            create_record_graph(row, case.id)
+            import_csv_batch(imported_rows, case.id)
         except Exception as exc:
-            result["graph_failed"] += 1
-            result["errors"].append({"record_id": record_id, "reason": f"Graph: {exc}"})
+            result["graph_failed"] += len(imported_rows)
+            result["errors"].append({"reason": f"Graph: {exc}"})
 
     result["status"] = "completed" if not result["records_failed"] and not result["graph_failed"] else "completed_with_errors"
     return result
