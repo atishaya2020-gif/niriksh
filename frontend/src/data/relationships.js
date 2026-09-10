@@ -1,0 +1,222 @@
+export const mockRelationships = [
+  {
+    id: "rel-001",
+    source: "person:raj-kumar",
+    target: "phone:9826000000",
+    type: "CONNECTED_TO",
+    label: "Primary Phone Device",
+    confidence: 0.96,
+    evidence_id: "EVD-4091",
+    timestamp: "14 Apr 2025",
+    why_detected: "Frequent cell tower association and IMEI device pairing from CDR record."
+  },
+  {
+    id: "rel-002",
+    source: "person:raj-kumar",
+    target: "org:northline",
+    type: "ASSOCIATED_WITH",
+    label: "Managing Operator",
+    confidence: 0.94,
+    evidence_id: "EVD-1022",
+    timestamp: "12 Apr 2025",
+    why_detected: "ROC corporate registration listing Raj Kumar as registered operational contact."
+  },
+  {
+    id: "rel-003",
+    source: "person:raj-kumar",
+    target: "veh:pb10xx1234",
+    type: "ASSOCIATED_WITH",
+    label: "Vehicle Operator",
+    confidence: 0.92,
+    evidence_id: "EVD-8831",
+    timestamp: "13 Apr 2025",
+    why_detected: "High frequency ANPR camera captures on NH44 highway coinciding with mobile location."
+  },
+  {
+    id: "rel-004",
+    source: "person:raj-kumar",
+    target: "loc:ludhiana",
+    type: "LOCATED_AT",
+    label: "Frequent Location",
+    confidence: 0.95,
+    evidence_id: "EVD-3301",
+    timestamp: "Daily Footprint",
+    why_detected: "Overlapping cell tower ping analysis across 30 consecutive days."
+  },
+  {
+    id: "rel-005",
+    source: "phone:9826000000",
+    target: "phone:9811122233",
+    type: "COMMUNICATED_WITH",
+    label: "142 CDR Call Logs",
+    confidence: 0.89,
+    evidence_id: "EVD-4091",
+    timestamp: "01 Mar - 14 Apr 2025",
+    why_detected: "High call volume (142 outbound/inbound voice calls) during night hours."
+  },
+  {
+    id: "rel-006",
+    source: "phone:9811122233",
+    target: "person:amit-verma",
+    type: "CONNECTED_TO",
+    label: "Registered Subscriber",
+    confidence: 0.91,
+    evidence_id: "EVD-4091",
+    timestamp: "10 Apr 2025",
+    why_detected: "Subscriber identity record provided by telecom service provider."
+  },
+  {
+    id: "rel-007",
+    source: "person:amit-verma",
+    target: "fin:acct-9011",
+    type: "CONNECTED_TO",
+    label: "Account Signatory",
+    confidence: 0.90,
+    evidence_id: "EVD-6012",
+    timestamp: "11 Apr 2025",
+    why_detected: "Bank account signature card and KYC document extraction."
+  },
+  {
+    id: "rel-008",
+    source: "org:northline",
+    target: "fin:acct-2048",
+    type: "CONNECTED_TO",
+    label: "Corporate Bank Account",
+    confidence: 0.96,
+    evidence_id: "EVD-6012",
+    timestamp: "15 Apr 2025",
+    why_detected: "Corporate bank statement audit."
+  },
+  {
+    id: "rel-009",
+    source: "fin:acct-2048",
+    target: "txn:89042",
+    type: "TRANSACTED_WITH",
+    label: "Originating Account",
+    confidence: 0.98,
+    evidence_id: "EVD-6012",
+    timestamp: "11 Apr 2025 14:22",
+    why_detected: "Electronic RTGS wire transaction audit log."
+  },
+  {
+    id: "rel-010",
+    source: "txn:89042",
+    target: "fin:acct-9011",
+    type: "TRANSACTED_WITH",
+    label: "Destination Account",
+    confidence: 0.98,
+    evidence_id: "EVD-6012",
+    timestamp: "11 Apr 2025 14:22",
+    why_detected: "Inter-bank credit settlement record."
+  },
+  {
+    id: "rel-011",
+    source: "person:raj-kumar",
+    target: "person:neha-singh",
+    type: "COMMUNICATED_WITH",
+    label: "Direct Associated Contact",
+    confidence: 0.83,
+    evidence_id: "EVD-4091",
+    timestamp: "08 Apr 2025",
+    why_detected: "18 short-duration phone calls and SMS exchanges."
+  },
+  {
+    id: "rel-012",
+    source: "person:neha-singh",
+    target: "fin:acct-4402",
+    type: "CONNECTED_TO",
+    label: "Account Holder",
+    confidence: 0.84,
+    evidence_id: "EVD-6012",
+    timestamp: "08 Apr 2025",
+    why_detected: "KYC profile match."
+  },
+  {
+    id: "rel-013",
+    source: "person:raj-kumar",
+    target: "person:r-kumar",
+    type: "ASSOCIATED_WITH",
+    label: "Potential Identity Match (92%)",
+    confidence: 0.92,
+    evidence_id: "EVD-9901",
+    timestamp: "Automated Entity Resolution",
+    why_detected: "Overlapping phone numbers, vehicle registrations, and geographic proximity across Cases C-1024 and C-1041."
+  },
+  {
+    id: "rel-014",
+    source: "person:r-kumar",
+    target: "person:vikramjeet-gill",
+    type: "COMMUNICATED_WITH",
+    label: "Repeated Intercepts",
+    confidence: 0.88,
+    evidence_id: "EVD-4091",
+    timestamp: "12 Apr 2025",
+    why_detected: "Encrypted voice channel call frequency."
+  },
+  {
+    id: "rel-015",
+    source: "person:vikramjeet-gill",
+    target: "loc:amritsar",
+    type: "LOCATED_AT",
+    label: "Border Terminal Hub",
+    confidence: 0.94,
+    evidence_id: "EVD-3301",
+    timestamp: "14 Apr 2025",
+    why_detected: "Checkpoint surveillance log."
+  },
+  {
+    id: "rel-016",
+    source: "veh:pb10xx1234",
+    target: "loc:warehouse",
+    type: "LOCATED_AT",
+    label: "Night Transport Stop",
+    confidence: 0.93,
+    evidence_id: "EVD-8831",
+    timestamp: "09 Apr 2025 23:15",
+    why_detected: "CCTV license plate camera recognition at warehouse entry point."
+  },
+  {
+    id: "rel-017",
+    source: "person:raj-kumar",
+    target: "evt:warehouse-meet",
+    type: "INVOLVED_IN_EVENT",
+    label: "Attended Meeting",
+    confidence: 0.91,
+    evidence_id: "EVD-8831",
+    timestamp: "09 Apr 2025 23:45",
+    why_detected: "Cell site tower ping and vehicle ANPR alignment."
+  },
+  {
+    id: "rel-018",
+    source: "org:northline",
+    target: "org:apex",
+    type: "TRANSACTED_WITH",
+    label: "Inter-Company Commercial Invoices",
+    confidence: 0.87,
+    evidence_id: "EVD-1022",
+    timestamp: "10 Apr 2025",
+    why_detected: "GST e-way bill cross-referencing."
+  },
+  {
+    id: "rel-019",
+    source: "person:sandeep-malhotra",
+    target: "org:apex",
+    type: "CONNECTED_TO",
+    label: "Director",
+    confidence: 0.89,
+    evidence_id: "EVD-1022",
+    timestamp: "05 Apr 2025",
+    why_detected: "ROC Director Identification Number (DIN) filing."
+  },
+  {
+    id: "rel-020",
+    source: "person:raj-kumar",
+    target: "case:c-1024",
+    type: "PART_OF_CASE",
+    label: "Subject in Operation Alpha",
+    confidence: 1.0,
+    evidence_id: "FIR-PB-2025-09",
+    timestamp: "12 Mar 2025",
+    why_detected: "Primary Subject listed in Case Ingestion File."
+  }
+];
