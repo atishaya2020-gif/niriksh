@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.db.models import ProcessingJob, RawRecord
+from app.db.postgres import SessionLocal
 from app.services.graph_service import import_csv_batch
 
 
@@ -26,11 +27,10 @@ def update_job(
     error_message: str | None = None,
 ):
     """
-    Update a processing job using a short PostgreSQL transaction.
+    Persist a short processing-job status transaction.
 
-    Important:
-    Never keep a PostgreSQL transaction open while Neo4j or another
-    external service is doing long-running work.
+    This function is only intended for short PostgreSQL operations.
+    Never use it while Neo4j is doing long-running work.
     """
 
     job.status = status
@@ -60,10 +60,9 @@ def raw_rows_for_job(
     job: ProcessingJob,
 ) -> list[dict]:
     """
-    Load all records belonging to a processing job.
+    Load all PostgreSQL payloads belonging to a processing job.
 
-    Uses one PostgreSQL query instead of one query per record.
-    This is important for large imports such as the 10,000-row SIH dataset.
+    One query is used instead of querying each record individually.
     """
 
     record_ids = job.record_ids or []
@@ -85,7 +84,6 @@ def raw_rows_for_job(
         for record in records
     }
 
-    # Preserve the original job record order.
     return [
         records_by_id[record_id]
         for record_id in record_ids
@@ -93,25 +91,123 @@ def raw_rows_for_job(
     ]
 
 
+def _persist_final_job_state(
+    job_id: int,
+    *,
+    status: str,
+    entities_extracted: int,
+    relationships_detected: int,
+    error_message: str | None = None,
+) -> ProcessingJob | None:
+    """
+    Persist final processing state using a completely fresh PostgreSQL
+    session.
+
+    The original request session is deliberately NOT reused here.
+
+    This prevents a Neon PostgreSQL connection from remaining associated
+    with a long-running Neo4j transaction.
+    """
+
+    status_db = SessionLocal()
+
+    try:
+        fresh_job = status_db.get(
+            ProcessingJob,
+            job_id,
+        )
+
+        if fresh_job is None:
+            status_db.rollback()
+            return None
+
+        fresh_job.status = status
+        fresh_job.stage = status
+
+        fresh_job.entities_extracted = int(
+            entities_extracted or 0
+        )
+
+        fresh_job.relationships_detected = int(
+            relationships_detected or 0
+        )
+
+        fresh_job.error_message = error_message
+
+        if status in TERMINAL_STATUSES:
+            fresh_job.completed_at = utcnow()
+
+        status_db.commit()
+        status_db.refresh(fresh_job)
+
+        return fresh_job
+
+    except Exception:
+        status_db.rollback()
+        raise
+
+    finally:
+        status_db.close()
+
+
+def _copy_job_state(
+    source: ProcessingJob,
+    target: ProcessingJob,
+) -> None:
+    """
+    Copy persisted values back onto the original request-local object.
+
+    The original SQLAlchemy session may already have been closed by the
+    time this function runs, so copy the values explicitly.
+    """
+
+    target.status = source.status
+    target.stage = source.stage
+
+    target.entities_extracted = (
+        source.entities_extracted
+    )
+
+    target.relationships_detected = (
+        source.relationships_detected
+    )
+
+    target.error_message = (
+        source.error_message
+    )
+
+    target.completed_at = (
+        source.completed_at
+    )
+
+    target.attempt_count = (
+        source.attempt_count
+    )
+
+
 def sync_job_graph(
     db: Session,
     job: ProcessingJob,
 ) -> dict:
     """
-    Synchronize the processing job's records into Neo4j.
+    Synchronize a processing job's records into Neo4j.
 
-    Critical transaction rule:
+    Transaction lifecycle:
 
-        PostgreSQL work
-              ↓
-        COMMIT / ROLLBACK
-              ↓
-        Neo4j long-running operation
-              ↓
-        PostgreSQL short status update
+        PostgreSQL status update
+                ↓
+        PostgreSQL data read
+                ↓
+        CLOSE PostgreSQL session
+                ↓
+        Long-running Neo4j operation
+                ↓
+        NEW PostgreSQL session
+                ↓
+        Final job status update
 
-    This prevents Neon/PostgreSQL from killing an idle transaction while
-    Neo4j is processing thousands of records.
+    The important part is that the PostgreSQL session is completely
+    closed before Neo4j processing begins.
     """
 
     if job.status == "CANCELLED":
@@ -119,6 +215,9 @@ def sync_job_graph(
             "success": False,
             "message": "Processing job is cancelled",
         }
+
+    job_id = job.id
+    case_id = job.case_id
 
     # ---------------------------------------------------------
     # 1. Mark job as GRAPH_SYNCING
@@ -134,17 +233,20 @@ def sync_job_graph(
     # 2. Increment attempt count
     # ---------------------------------------------------------
 
-    job.attempt_count = (job.attempt_count or 0) + 1
+    job.attempt_count = (
+        job.attempt_count or 0
+    ) + 1
 
     try:
         db.commit()
         db.refresh(job)
+
     except Exception:
         db.rollback()
         raise
 
     # ---------------------------------------------------------
-    # 3. Read PostgreSQL data BEFORE starting Neo4j work
+    # 3. Read all PostgreSQL records BEFORE Neo4j work
     # ---------------------------------------------------------
 
     rows = raw_rows_for_job(
@@ -152,19 +254,24 @@ def sync_job_graph(
         job,
     )
 
-    case_id = job.case_id
-
     # ---------------------------------------------------------
-    # 4. IMPORTANT:
-    #    End any PostgreSQL transaction before Neo4j starts.
+    # 4. CRITICAL
+    #
+    # Completely close the original PostgreSQL session.
+    #
+    # rollback() ends the transaction.
+    # close() additionally releases the SQLAlchemy connection.
     # ---------------------------------------------------------
 
-    db.rollback()
+    try:
+        db.rollback()
+    finally:
+        db.close()
 
     # ---------------------------------------------------------
     # 5. Long-running Neo4j operation
     #
-    #    There must NOT be an open PostgreSQL transaction here.
+    # NO PostgreSQL session is active here.
     # ---------------------------------------------------------
 
     try:
@@ -174,25 +281,29 @@ def sync_job_graph(
         )
 
     except Exception as exc:
-        error_message = f"Graph: {exc}"
 
-        # Make sure the SQLAlchemy session is clean before
-        # attempting the failure update.
-        try:
-            db.rollback()
-        except Exception:
-            pass
+        error_message = (
+            f"Graph: {exc}"
+        )
 
+        # Use a completely fresh PostgreSQL session.
         try:
-            update_job(
-                db,
-                job,
-                "FAILED",
+            failed_job = _persist_final_job_state(
+                job_id,
+                status="FAILED",
+                entities_extracted=0,
+                relationships_detected=0,
                 error_message=error_message,
             )
+
+            if failed_job is not None:
+                _copy_job_state(
+                    failed_job,
+                    job,
+                )
+
         except Exception:
-            # The original Neo4j error is more useful than a
-            # secondary PostgreSQL status-update error.
+            # Preserve the original graph error.
             pass
 
         return {
@@ -201,75 +312,75 @@ def sync_job_graph(
         }
 
     # ---------------------------------------------------------
-    # 6. Neo4j succeeded.
-    #
-    #    Now update PostgreSQL with the results.
+    # 6. Neo4j succeeded
     # ---------------------------------------------------------
 
     entities_extracted = int(
-        result.get("entities_extracted", 0) or 0
+        result.get(
+            "entities_extracted",
+            0,
+        ) or 0
     )
 
     relationships_detected = int(
-        result.get("relationships_detected", 0) or 0
+        result.get(
+            "relationships_detected",
+            0,
+        ) or 0
     )
 
-    job.entities_extracted = entities_extracted
-    job.relationships_detected = relationships_detected
-    job.error_message = None
-
     # ---------------------------------------------------------
-    # 7. Short PostgreSQL transaction.
-    #
-    #    This happens AFTER Neo4j has finished.
+    # 7. Persist final state using a NEW PostgreSQL session
     # ---------------------------------------------------------
 
     try:
-        update_job(
-            db,
-            job,
-            "COMPLETED",
+
+        final_job = _persist_final_job_state(
+            job_id,
+            status="COMPLETED",
+            entities_extracted=entities_extracted,
+            relationships_detected=relationships_detected,
+            error_message=None,
         )
 
-    except Exception as exc:
-        # If the final status update itself fails, make one clean
-        # retry using a fresh transaction.
-        try:
-            db.rollback()
+        if final_job is not None:
 
-            refreshed_job = db.get(
-                ProcessingJob,
-                job.id,
+            _copy_job_state(
+                final_job,
+                job,
             )
 
-            if refreshed_job is not None:
-                refreshed_job.status = "COMPLETED"
-                refreshed_job.stage = "COMPLETED"
-                refreshed_job.entities_extracted = entities_extracted
-                refreshed_job.relationships_detected = (
-                    relationships_detected
-                )
-                refreshed_job.error_message = None
-                refreshed_job.completed_at = utcnow()
+        else:
 
-                db.commit()
-                db.refresh(refreshed_job)
+            # Database row unexpectedly disappeared.
+            # Keep the request-local object accurate.
+            job.status = "COMPLETED"
+            job.stage = "COMPLETED"
 
-                job = refreshed_job
+            job.entities_extracted = (
+                entities_extracted
+            )
 
-        except Exception:
-            # At this point Neo4j has already completed successfully.
-            # Do not report the graph operation itself as failed.
-            db.rollback()
+            job.relationships_detected = (
+                relationships_detected
+            )
 
-            return {
-                "success": True,
-                "data": result,
-                "warning": (
-                    "Neo4j synchronization completed, but the "
-                    "processing-job status could not be persisted."
-                ),
-            }
+    except Exception as exc:
+
+        # Neo4j already completed successfully.
+        #
+        # Do NOT report the graph processing as failed just because
+        # the final PostgreSQL status update encountered a problem.
+
+        return {
+            "success": True,
+            "data": result,
+            "warning": (
+                "Neo4j synchronization completed, "
+                "but the processing-job status could not "
+                f"be persisted: {exc}"
+            ),
+        }
 
     return {
         "success": True,
@@ -283,7 +394,7 @@ def retry_job_graph(
 ) -> dict:
     """
     Retry graph synchronization for a job whose graph stage
-    has not completed successfully.
+    did not complete successfully.
     """
 
     if job.status not in {
