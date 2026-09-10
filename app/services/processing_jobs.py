@@ -156,9 +156,6 @@ def _copy_job_state(
 ) -> None:
     """
     Copy persisted values back onto the original request-local object.
-
-    The original SQLAlchemy session may already have been closed by the
-    time this function runs, so copy the values explicitly.
     """
 
     target.status = source.status
@@ -260,7 +257,7 @@ def sync_job_graph(
     # Completely close the original PostgreSQL session.
     #
     # rollback() ends the transaction.
-    # close() additionally releases the SQLAlchemy connection.
+    # close() releases the SQLAlchemy connection.
     # ---------------------------------------------------------
 
     try:
@@ -354,6 +351,7 @@ def sync_job_graph(
 
             # Database row unexpectedly disappeared.
             # Keep the request-local object accurate.
+
             job.status = "COMPLETED"
             job.stage = "COMPLETED"
 
@@ -393,12 +391,18 @@ def retry_job_graph(
     job: ProcessingJob,
 ) -> dict:
     """
-    Retry graph synchronization for a job whose graph stage
-    did not complete successfully.
+    Retry graph synchronization for a processing job whose graph
+    stage did not complete successfully.
+
+    GRAPH_SYNCING is intentionally retryable because a deployment,
+    request timeout, worker restart, database connection failure,
+    or interrupted request can leave a job stuck in GRAPH_SYNCING
+    even when Neo4j already contains some or all of the graph.
     """
 
     if job.status not in {
         "GRAPH_PENDING",
+        "GRAPH_SYNCING",
         "FAILED",
         "COMPLETED_WITH_WARNINGS",
     }:
