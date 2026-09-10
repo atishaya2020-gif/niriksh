@@ -14,7 +14,7 @@ def key_people(
 ):
     query = """
     MATCH (p:Person)
-    OPTIONAL MATCH (p)-[r]-()
+    OPTIONAL MATCH (p)-[r:MENTIONS|OWNS_PHONE|CONTAINS_PHONE|ASSOCIATED_WITH|USES_DEVICE|USES_ACCOUNT|CALLED|FILED_AT|REPRESENTS|INVOLVES_ACCOUNT|AT_MERCHANT|HAS_TRANSACTION]-()
     WITH p, count(DISTINCT r) AS degree
     OPTIONAL MATCH (p)<-[:MENTIONS]-(record:Record)
     WITH p, degree, count(DISTINCT record) AS connected_records
@@ -51,8 +51,9 @@ def communities(
 ):
     query = """
     MATCH (p:Person)
-    OPTIONAL MATCH (p)-[*1..3]-(member)
+    OPTIONAL MATCH path=(p)-[*1..3]-(member)
     WHERE member:Person
+      AND ALL(r IN relationships(path) WHERE type(r) <> 'MATCHED_WITH')
     WITH p, collect(DISTINCT member.entity_id) + p.entity_id AS members
     WITH reduce(
         anchor = head(members),
@@ -85,6 +86,7 @@ def hidden_links(
     MATCH path=(a:Person)-[*2..3]-(b:Person)
     WHERE a.entity_id < b.entity_id
       AND NOT (a)-[:MENTIONS]-(b)
+      AND ALL(r IN relationships(path) WHERE type(r) <> 'MATCHED_WITH')
 
     WITH a, b, path,
          [node IN nodes(path) | labels(node)[0]] AS node_types

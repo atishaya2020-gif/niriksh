@@ -112,6 +112,7 @@ def get_case_network(
     network_query = """
     MATCH (p:Person)-[r]-(other)
     WHERE p.entity_id IN $person_ids
+      AND type(r) <> 'MATCHED_WITH'
 
     RETURN
         p.entity_id AS source_id,

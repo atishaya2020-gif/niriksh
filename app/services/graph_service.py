@@ -415,7 +415,8 @@ def get_graph(case_id: int | None = None, entity_id: str | None = None, depth: i
 
     query = """
     MATCH (n)-[r]->(m)
-    WHERE $case_id IS NULL OR n.case_id = $case_id OR m.case_id = $case_id OR r.case_id = $case_id
+    WHERE ($case_id IS NULL OR n.case_id = $case_id OR m.case_id = $case_id OR r.case_id = $case_id)
+      AND type(r) <> 'MATCHED_WITH'
     RETURN collect(DISTINCT {id:n.entity_id, type:labels(n)[0], label:coalesce(n.name,n.value,n.entity_id), properties:properties(n)}) +
            collect(DISTINCT {id:m.entity_id, type:labels(m)[0], label:coalesce(m.name,m.value,m.entity_id), properties:properties(m)}) AS nodes,
            collect(DISTINCT {id:elementId(r), source:n.entity_id, target:m.entity_id, type:type(r), properties:properties(r)}) AS edges

@@ -116,6 +116,7 @@ def get_entity(
 
     connection_summary_query = """
     MATCH (n {entity_id: $entity_id})-[r]-(other)
+    WHERE type(r) <> 'MATCHED_WITH'
 
     RETURN
         type(r) AS relationship_type,

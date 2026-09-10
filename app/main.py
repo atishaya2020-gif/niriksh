@@ -15,6 +15,8 @@ from app.api import (
     alerts,
     network,
     search,
+    evidence,
+    matches,
 )
 
 from app.db.models import Base
@@ -109,6 +111,16 @@ app.include_router(
 
 app.include_router(
     search.router,
+    prefix="/api",
+)
+
+app.include_router(
+    evidence.router,
+    prefix="/api",
+)
+
+app.include_router(
+    matches.router,
     prefix="/api",
 )
 

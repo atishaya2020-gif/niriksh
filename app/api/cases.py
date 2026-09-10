@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user
-from app.db.models import Alert, Case, RawRecord, User
+from app.db.models import Alert, Case, Evidence, RawRecord, User
 from app.db.neo4j import neo4j_client
 from app.db.postgres import get_db
 from app.schemas.case import CaseCreate, CaseResponse
@@ -235,4 +235,107 @@ def get_case_overview(
             ),
         },
         "message": "Case investigation overview retrieved",
+    }
+
+
+@router.get("/{case_id}/timeline")
+def get_case_timeline(
+    case_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    case = db.get(Case, case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    events = []
+
+    events.append({
+        "timestamp": case.created_at,
+        "event_type": "CASE_CREATED",
+        "description": f"Case '{case.title}' created",
+        "case_id": case.id,
+        "record_id": None,
+        "entity_id": None,
+        "source": "case",
+    })
+
+    raw_records = (
+        db.query(RawRecord)
+        .filter(RawRecord.case_id == case_id)
+        .filter(RawRecord.incident_datetime.isnot(None))
+        .all()
+    )
+
+    for rec in raw_records:
+        events.append({
+            "timestamp": rec.incident_datetime,
+            "event_type": f"RECORD_{rec.category.upper().replace(' ', '_')}",
+            "description": f"Incident recorded in {rec.category} (record {rec.record_id})",
+            "case_id": case_id,
+            "record_id": rec.record_id,
+            "entity_id": None,
+            "source": rec.category.lower(),
+        })
+
+    alerts = (
+        db.query(Alert)
+        .filter(Alert.case_id == case_id)
+        .all()
+    )
+
+    for alert in alerts:
+        events.append({
+            "timestamp": alert.created_at,
+            "event_type": "ALERT_GENERATED",
+            "description": f"Alert: {alert.alert_type} ({alert.risk_level} risk)",
+            "case_id": case_id,
+            "record_id": None,
+            "entity_id": alert.entity_id,
+            "source": "alert_service",
+        })
+
+    evidences = (
+        db.query(Evidence)
+        .filter(Evidence.case_id == case_id)
+        .all()
+    )
+
+    for ev in evidences:
+        events.append({
+            "timestamp": ev.created_at,
+            "event_type": "EVIDENCE_COLLECTED",
+            "description": f"Evidence collected: {ev.evidence_type} from {ev.source}",
+            "case_id": case_id,
+            "record_id": ev.record_id,
+            "entity_id": None,
+            "source": "evidence",
+        })
+
+        if ev.verified_at is not None:
+            events.append({
+                "timestamp": ev.verified_at,
+                "event_type": f"EVIDENCE_{ev.verification_status}",
+                "description": f"Evidence #{ev.id} {ev.verification_status.lower().replace('_', ' ')}",
+                "case_id": case_id,
+                "record_id": ev.record_id,
+                "entity_id": None,
+                "source": "evidence_review",
+            })
+
+    events.sort(
+        key=lambda e: e["timestamp"] if e["timestamp"] else "",
+    )
+
+    total = len(events)
+    start = (page - 1) * page_size
+    end = start + page_size
+
+    return {
+        "items": events[start:end],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
     }

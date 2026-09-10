@@ -75,3 +75,69 @@ class Alert(Base):
         DateTime(timezone=True),
         server_default=func.now(),
     )
+
+
+EVIDENCE_TYPES = [
+    "CALL_RECORD",
+    "FINANCIAL_TRANSACTION",
+    "FIR_DOCUMENT",
+    "DIGITAL_FORENSIC",
+    "SURVEILLANCE",
+    "WITNESS_STATEMENT",
+    "DOCUMENT",
+    "OTHER",
+]
+
+VERIFICATION_STATUSES = [
+    "PENDING",
+    "VERIFIED",
+    "REJECTED",
+    "REQUIRES_REVIEW",
+]
+
+
+class Evidence(Base):
+    __tablename__ = "evidence"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    case_id: Mapped[int] = mapped_column(ForeignKey("cases.id"), index=True)
+    record_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    evidence_type: Mapped[str] = mapped_column(String(50))
+    source: Mapped[str] = mapped_column(String(255))
+    description: Mapped[str] = mapped_column(Text())
+    collection_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    verification_status: Mapped[str] = mapped_column(String(30), default="PENDING", index=True)
+    confidence: Mapped[float] = mapped_column(default=0.0)
+    evidence_metadata: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
+    verified_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+MATCH_STATUSES = [
+    "PENDING_REVIEW",
+    "CONFIRMED",
+    "REJECTED",
+]
+
+
+class EntityMatch(Base):
+    __tablename__ = "entity_matches"
+    __table_args__ = (UniqueConstraint("case_id", "source_entity_id", "candidate_entity_id", name="uq_entity_matches_case_source_candidate"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    case_id: Mapped[int] = mapped_column(ForeignKey("cases.id"), index=True)
+    source_entity_id: Mapped[str] = mapped_column(String(255), index=True)
+    candidate_entity_id: Mapped[str] = mapped_column(String(255), index=True)
+    source_entity_type: Mapped[str] = mapped_column(String(50))
+    candidate_entity_type: Mapped[str] = mapped_column(String(50))
+    match_score: Mapped[float] = mapped_column(default=0.0)
+    confidence: Mapped[float] = mapped_column(default=0.0)
+    matching_factors: Mapped[dict | None] = mapped_column("factors", JSONB, nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default="PENDING_REVIEW", index=True)
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
