@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   useNavigate,
   useSearchParams
@@ -13,17 +13,19 @@ import {
 
 import GlassCard from '../components/ui/GlassCard';
 import Button from '../components/ui/Button';
+import Select from '../components/ui/Select';
 import { apiUpload } from '../services/api';
+import caseService from '../services/caseService';
 
 export const DataIntakePage = () => {
-  const [searchParams] =
+  const [searchParams, setSearchParams] =
     useSearchParams();
 
   const navigate =
     useNavigate();
 
-  const caseId =
-    searchParams.get('caseId');
+  const [cases, setCases] = useState([]);
+  const [selectedCaseId, setSelectedCaseId] = useState(searchParams.get('caseId') || '');
 
   const [file, setFile] =
     useState(null);
@@ -36,6 +38,21 @@ export const DataIntakePage = () => {
 
   const [error, setError] =
     useState('');
+
+  useEffect(() => {
+    const loadCases = async () => {
+      try {
+        const caseList = await caseService.getCases();
+        setCases(caseList);
+        if (!selectedCaseId && caseList.length > 0) {
+          setSelectedCaseId(String(caseList[0].id));
+        }
+      } catch (err) {
+        console.error('Failed to load cases for intake:', err);
+      }
+    };
+    loadCases();
+  }, []);
 
   const handleFileChange = (
     event
@@ -70,7 +87,7 @@ export const DataIntakePage = () => {
     setError('');
     setResult(null);
 
-    if (!caseId) {
+    if (!selectedCaseId) {
       setError(
         'Please select a case first.'
       );
@@ -87,6 +104,7 @@ export const DataIntakePage = () => {
     setUploading(true);
 
     try {
+      const numericId = await caseService.resolveCaseId(selectedCaseId);
       const formData =
         new FormData();
 
@@ -97,7 +115,7 @@ export const DataIntakePage = () => {
 
       const response =
         await apiUpload(
-          `/cases/${Number(caseId)}/upload-csv`,
+          `/cases/${numericId}/upload-csv`,
           formData
         );
 
@@ -141,17 +159,31 @@ export const DataIntakePage = () => {
           className="space-y-6"
         >
 
-          <div className="text-center">
+          <div className="text-center space-y-3">
 
-            <Upload className="w-12 h-12 text-cyan-400 mx-auto mb-4" />
+            <Upload className="w-12 h-12 text-cyan-400 mx-auto mb-2" />
 
             <h2 className="text-lg font-bold text-white">
               Upload Investigation Data
             </h2>
 
-            <p className="text-xs text-purple-300/70 mt-2">
-              Case ID: {caseId || 'Not selected'}
-            </p>
+            <div className="max-w-md mx-auto text-left">
+              <Select
+                label="Target Investigation Case"
+                value={selectedCaseId}
+                onChange={(e) => {
+                  setSelectedCaseId(e.target.value);
+                  setSearchParams({ caseId: e.target.value }, { replace: true });
+                }}
+                options={[
+                  { value: '', label: 'Select a target case' },
+                  ...cases.map((c) => ({
+                    value: String(c.id),
+                    label: `${c.case_number} — ${c.title}`
+                  }))
+                ]}
+              />
+            </div>
 
           </div>
 
@@ -160,10 +192,11 @@ export const DataIntakePage = () => {
             <FileText className="w-10 h-10 text-purple-300 mx-auto mb-4" />
 
             <input
+              id="csv-file-input"
               type="file"
               accept=".csv,text/csv"
               onChange={handleFileChange}
-              className="block w-full text-sm text-purple-200"
+              className="block w-full text-sm text-purple-200 cursor-pointer"
             />
 
             {file && (
@@ -177,7 +210,7 @@ export const DataIntakePage = () => {
           {error && (
             <div className="p-4 rounded-xl border border-red-500/40 bg-red-950/30 text-red-300 text-xs flex gap-2">
 
-              <AlertCircle className="w-4 h-4" />
+              <AlertCircle className="w-4 h-4 flex-shrink-0" />
 
               <span>{error}</span>
 
@@ -197,13 +230,31 @@ export const DataIntakePage = () => {
 
               </div>
 
-              <pre className="whitespace-pre-wrap text-purple-200 overflow-auto">
-                {JSON.stringify(
-                  result,
-                  null,
-                  2
-                )}
-              </pre>
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <div className="p-2 bg-slate-900/50 rounded border border-purple-900/30">
+                  <p className="text-purple-400 uppercase text-[10px] font-bold">Records Received</p>
+                  <p className="text-cyan-300 text-lg font-bold">{result.job?.records_received || result.records_received || 0}</p>
+                </div>
+                <div className="p-2 bg-slate-900/50 rounded border border-purple-900/30">
+                  <p className="text-purple-400 uppercase text-[10px] font-bold">Records Processed</p>
+                  <p className="text-emerald-300 text-lg font-bold">{result.job?.records_processed || result.records_imported || 0}</p>
+                </div>
+                <div className="p-2 bg-slate-900/50 rounded border border-purple-900/30">
+                  <p className="text-purple-400 uppercase text-[10px] font-bold">Entities Extracted</p>
+                  <p className="text-cyan-300 text-lg font-bold">{result.job?.entities_extracted || result.entities_extracted || 0}</p>
+                </div>
+                <div className="p-2 bg-slate-900/50 rounded border border-purple-900/30">
+                  <p className="text-purple-400 uppercase text-[10px] font-bold">Relationships Detected</p>
+                  <p className="text-cyan-300 text-lg font-bold">{result.job?.relationships_detected || result.relationships_detected || 0}</p>
+                </div>
+              </div>
+
+              <details className="cursor-pointer">
+                <summary className="text-[10px] text-purple-400/60 uppercase font-bold hover:text-purple-300">View Full Job Payload</summary>
+                <pre className="mt-2 p-2 bg-slate-950 rounded border border-purple-900/40 whitespace-pre-wrap text-[10px] text-purple-300/80 overflow-auto max-h-40">
+                  {JSON.stringify(result, null, 2)}
+                </pre>
+              </details>
 
             </div>
           )}
@@ -217,7 +268,7 @@ export const DataIntakePage = () => {
               disabled={
                 uploading ||
                 !file ||
-                !caseId
+                !selectedCaseId
               }
             >
               {uploading
@@ -230,8 +281,8 @@ export const DataIntakePage = () => {
               variant="secondary"
               onClick={() =>
                 navigate(
-                  caseId
-                    ? `/cases/${caseId}`
+                  selectedCaseId
+                    ? `/cases/${selectedCaseId}`
                     : '/cases'
                 )
               }

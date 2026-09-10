@@ -57,7 +57,7 @@ export const apiPost = async (url, data = {}, config = {}) => {
 export const apiUpload = async (url, formData) => {
   try {
     const response = await apiClient.post(url, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
+      headers: { 'Content-Type': undefined }
     });
     return response.data;
   } catch (error) {

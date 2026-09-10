@@ -225,8 +225,7 @@ def update_user_role(
             detail="Role is required.",
         )
 
-    target.role =
-        role.lower()
+    target.role = role.lower()
 
     db.commit()
     db.refresh(target)

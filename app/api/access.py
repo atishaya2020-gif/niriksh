@@ -270,8 +270,7 @@ def update_access_request(
                 "Invalid request status.",
         )
 
-    request.status =
-        status
+    request.status = status
 
     db.commit()
 

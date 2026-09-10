@@ -44,20 +44,23 @@ export const caseService = {
     return cases;
   },
 
-  getCase: async (caseId) => {
-    const numericCaseId =
-      Number(caseId);
-
-    if (
-      !Number.isInteger(
-        numericCaseId
-      ) ||
-      numericCaseId <= 0
-    ) {
-      throw new Error(
-        `Invalid database case ID: ${caseId}`
-      );
+  resolveCaseId: async (caseId) => {
+    let numericId = Number(caseId);
+    if (Number.isInteger(numericId) && numericId > 0) {
+      return numericId;
     }
+    const allCases = await caseService.getCases();
+    const matched = allCases.find(
+      (c) => c.case_number.toLowerCase() === String(caseId).toLowerCase()
+    );
+    if (matched && matched.id) {
+      return matched.id;
+    }
+    throw new Error(`Invalid or unknown case identifier: ${caseId}`);
+  },
+
+  getCase: async (caseId) => {
+    const numericCaseId = await caseService.resolveCaseId(caseId);
 
     const response =
       await apiGet(
@@ -129,19 +132,7 @@ export const caseService = {
     caseId,
     params = {}
   ) => {
-    const numericCaseId =
-      Number(caseId);
-
-    if (
-      !Number.isInteger(
-        numericCaseId
-      ) ||
-      numericCaseId <= 0
-    ) {
-      throw new Error(
-        `Invalid database case ID: ${caseId}`
-      );
-    }
+    const numericCaseId = await caseService.resolveCaseId(caseId);
 
     return apiGet(
       `/cases/${numericCaseId}/timeline`,

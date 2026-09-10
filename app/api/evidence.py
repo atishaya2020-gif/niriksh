@@ -147,6 +147,8 @@ def verify_evidence(
         )
 
     evidence.verification_status = status
+    if payload.confidence is not None:
+        evidence.confidence = payload.confidence
     evidence.verified_by = user.id
     evidence.verified_at = datetime.now(timezone.utc)
 
@@ -158,6 +160,7 @@ def verify_evidence(
         "data": {
             "id": evidence.id,
             "verification_status": evidence.verification_status,
+            "confidence": evidence.confidence,
             "verified_by": evidence.verified_by,
             "verified_at": evidence.verified_at,
         },

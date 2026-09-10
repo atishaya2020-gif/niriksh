@@ -35,10 +35,16 @@ class BatchQueue:
     def queue_entity_rel(self, source_label: str, source_id: str, relationship: str,
                          target_label: str, target_id: str, properties: dict):
         key = (source_label, target_label, relationship)
+        provenance = {
+            "case_id": properties.get("case_id"),
+            "record_id": properties.get("record_id"),
+            "source_field": properties.get("source_field"),
+        }
         self.entity_rel_rows_by_key.setdefault(key, []).append({
             "source_id": source_id,
             "target_id": target_id,
             "properties": properties,
+            "provenance": provenance,
         })
 
     def flush(self):
@@ -76,6 +82,16 @@ UNWIND $rows AS row
 MATCH (source:{source_label} {{entity_id: row.source_id}}), (target:{target_label} {{entity_id: row.target_id}})
 MERGE (source)-[rel:{relationship}]->(target)
 SET rel += row.properties
+FOREACH (_ IN CASE WHEN row.provenance.record_id IS NULL THEN [] ELSE [1] END |
+  SET rel.evidence_record_ids = coalesce(rel.evidence_record_ids, []) +
+    CASE WHEN NOT row.provenance.record_id IN coalesce(rel.evidence_record_ids, [])
+         THEN [row.provenance.record_id] ELSE [] END
+)
+FOREACH (_ IN CASE WHEN row.provenance.case_id IS NULL THEN [] ELSE [1] END |
+  SET rel.evidence_case_ids = coalesce(rel.evidence_case_ids, []) +
+    CASE WHEN NOT row.provenance.case_id IN coalesce(rel.evidence_case_ids, [])
+         THEN [row.provenance.case_id] ELSE [] END
+)
 """
 
 
@@ -86,6 +102,8 @@ class GraphBatch:
         self.batch_size = batch_size
         self._queued = 0
         self.queue = BatchQueue()
+        self.entity_ids: set[str] = set()
+        self.relationship_count = 0
 
     def maybe_flush(self):
         if self._queued >= self.batch_size:
@@ -100,6 +118,7 @@ class GraphBatch:
         self.maybe_flush()
 
     def merge_entity(self, label: str, entity_id: str, properties: dict):
+        self.entity_ids.add(entity_id)
         self.queue.queue_entity(label, entity_id, properties)
         self._counted()
 
@@ -111,6 +130,7 @@ class GraphBatch:
         relationship: str,
         **properties,
     ):
+        self.relationship_count += 1
         self.queue.queue_record_rel(record_node_id, entity_label, entity_id, relationship, properties)
         self._counted()
 
@@ -123,6 +143,7 @@ class GraphBatch:
         target_id: str,
         **properties,
     ):
+        self.relationship_count += 1
         self.queue.queue_entity_rel(source_label, source_id, relationship, target_label, target_id, properties)
         self._counted()
 
@@ -388,11 +409,16 @@ def create_record_graph(row: dict, case_id: int, batch: GraphBatch | None = None
         batch.flush_all()
 
 
-def import_csv_batch(rows: list[dict], case_id: int, batch_size: int = 200):
+def import_csv_batch(rows: list[dict], case_id: int, batch_size: int = 200) -> dict:
     batch = GraphBatch(batch_size=batch_size)
     for row in rows:
         create_record_graph(row, case_id, batch)
     batch.flush_all()
+    return {
+        "entities_extracted": len(batch.entity_ids),
+        "relationships_detected": batch.relationship_count,
+        "records_projected": len(rows),
+    }
 
 
 def get_graph(case_id: int | None = None, entity_id: str | None = None, depth: int = 2):

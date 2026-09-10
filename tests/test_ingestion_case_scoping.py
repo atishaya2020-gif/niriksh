@@ -28,6 +28,18 @@ class FakeQuery:
             None,
         )
 
+    def filter(self, *args):
+        return self
+
+    def all(self):
+        if self.criteria:
+            return [
+                record
+                for record in self.records
+                if all(getattr(record, key) == value for key, value in self.criteria.items())
+            ]
+        return list(self.records)
+
 
 class FakeSession:
     def __init__(self):
@@ -37,6 +49,9 @@ class FakeSession:
         if model is not RawRecord:
             raise ValueError("Only RawRecord queries are supported")
         return FakeQuery(self.records)
+
+    def refresh(self, record):
+        pass
 
     def add(self, record):
         if any(r.case_id == record.case_id and r.record_id == record.record_id for r in self.records):

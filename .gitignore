@@ -27,3 +27,8 @@ data/cybercrime_combined_dataset.csv
 tmp/
 temp/
 *.tmp
+
+# Local/test artifacts
+data/processing_test*.csv
+data/test*.csv
+*.sql

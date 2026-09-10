@@ -20,6 +20,7 @@ from app.api import (
     matches,
     admin,
     access,
+    processing_jobs,
 )
 
 from app.db.models import Base
@@ -146,6 +147,10 @@ app.include_router(
 )
 app.include_router(
     access.router,
+    prefix="/api",
+)
+app.include_router(
+    processing_jobs.router,
     prefix="/api",
 )
 

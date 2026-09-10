@@ -17,6 +17,7 @@ class EvidenceCreate(BaseModel):
 
 class EvidenceVerify(BaseModel):
     status: str = Field(..., description=f"Must be one of {VERIFICATION_STATUSES}")
+    confidence: float | None = Field(None, ge=0.0, le=1.0)
 
 
 class EvidenceResponse(BaseModel):

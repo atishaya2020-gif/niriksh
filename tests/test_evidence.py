@@ -63,6 +63,8 @@ class FakeSession:
         self._committed = False
 
     def get(self, model, pk):
+        if getattr(model, "__tablename__", None) == "users":
+            return DummyUser()
         if model.__tablename__ == "cases":
             if pk == 1:
                 return FakeCase()
@@ -321,6 +323,22 @@ class EvidenceVerificationTests(unittest.TestCase):
         data = response.json()
         self.assertTrue(data["success"])
         self.assertEqual(data["data"]["verification_status"], "VERIFIED")
+
+    @patch("app.api.evidence.get_db")
+    def test_verify_evidence_persists_confidence(self, mock_get_db):
+        db = FakeSession()
+        evidence = FakeEvidence(confidence=0.1)
+        db.get = lambda model, pk: evidence if getattr(model, "__tablename__", None) == "evidence" else (DummyUser() if getattr(model, "__tablename__", None) == "users" else None)
+        mock_get_db.return_value = db
+
+        response = self.client.patch(
+            "/api/evidence/1/verify",
+            headers=self.auth_headers,
+            json={"status": "VERIFIED", "confidence": 0.90},
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["data"]["confidence"], 0.90)
 
     @patch("app.api.evidence.get_db")
     def test_verify_evidence_invalid_status(self, mock_get_db):
