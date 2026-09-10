@@ -5,6 +5,7 @@ psycopg[binary]>=3.2,<4
 pydantic-settings>=2.6,<3
 python-multipart>=0.0.9,<1
 PyJWT>=2.9,<3
-pwdlib[argon2]>=0.2,<1pandas>=2.2,<3
+pwdlib[argon2]>=0.2,<1
+pandas>=2.2,<3
 neo4j>=5.25,<7
 spacy>=3.8,<4
