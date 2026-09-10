@@ -3,6 +3,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.core.config import settings
+
 from app.api import (
     auth,
     cases,
@@ -53,18 +55,31 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS middleware for frontend development
+
+# ---------------------------------------------------------
+# CORS
+# ---------------------------------------------------------
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
+        origin.strip()
+        for origin in settings.cors_origins.split(",")
+        if origin.strip()
     ],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_methods=[
+        "GET",
+        "POST",
+        "PATCH",
+        "PUT",
+        "DELETE",
+        "OPTIONS",
+    ],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+    ],
 )
 
 
@@ -141,14 +156,17 @@ app.include_router(
     matches.router,
     prefix="/api",
 )
+
 app.include_router(
     admin.router,
     prefix="/api",
 )
+
 app.include_router(
     access.router,
     prefix="/api",
 )
+
 app.include_router(
     processing_jobs.router,
     prefix="/api",
