@@ -18,6 +18,8 @@ from app.api import (
     search,
     evidence,
     matches,
+    admin,
+    access,
 )
 
 from app.db.models import Base
@@ -136,6 +138,14 @@ app.include_router(
 
 app.include_router(
     matches.router,
+    prefix="/api",
+)
+app.include_router(
+    admin.router,
+    prefix="/api",
+)
+app.include_router(
+    access.router,
     prefix="/api",
 )
 

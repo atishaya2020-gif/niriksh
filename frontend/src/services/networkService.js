@@ -1,75 +1,174 @@
 import { apiGet } from './api';
-import { backendGraphToCytoscape } from '../utils/graphTransform';
+
+import {
+  backendGraphToCytoscape
+} from '../utils/graphTransform';
 
 export const networkService = {
-  getGraph: async (caseId) => {
-      if (!Number.isInteger(Number(caseId))) {
-        throw { error: true, status: 400, message: 'Select a valid case before opening the network.' };
+
+  getGraph:
+    async (caseId) => {
+
+      const id =
+        Number(caseId);
+
+      if (
+        !Number.isInteger(id) ||
+        id <= 0
+      ) {
+        throw new Error(
+          'Select a valid case.'
+        );
       }
-      const response = await apiGet(`/network/${caseId}`);
-      const data = response.data || response;
-      const network = data.network || {};
+
+      const response =
+        await apiGet(
+          `/network/${id}`
+        );
+
+      const data =
+        response?.data ||
+        response;
+
+      const network =
+        data?.network ||
+        {};
 
       return {
-        nodes: (network.nodes || []).map((n) => ({
-          id: n.id,
-          name: n.label || n.id,
-          label: n.label || n.id,
-          type: n.type || 'UNKNOWN',
-          risk: n.risk || 'LOW',
-          risk_score: n.risk_score || 0,
-          confidence: 0.85,
-          metadata: n.metadata || {},
-          phone: n.metadata?.phone || null,
-          location: n.metadata?.location || null,
-          vehicle: n.metadata?.vehicle || null,
-          account: n.metadata?.account || null,
-          source: 'Graph Database',
-          cases: [],
-          potential_matches: []
-        })),
-        edges: (network.edges || []).map((e, idx) => ({
-          id: e.id || `edge-${idx}`,
-          source: e.source,
-          target: e.target,
-          type: (e.relationship_type || 'CONNECTED_TO').toUpperCase(),
-          label: e.relationship_type || 'Connected',
-          confidence: e.confidence || 0.85,
-          evidence_id: null,
-          timestamp: null,
-          why_detected: e.reason || 'Connection detected in investigation network.'
-        })),
-        _raw: data
+
+        nodes:
+          (network.nodes || [])
+            .map(
+              (node) => ({
+                id:
+                  node.id,
+
+                name:
+                  node.label ||
+                  node.id,
+
+                label:
+                  node.label ||
+                  node.id,
+
+                type:
+                  node.type ||
+                  'UNKNOWN',
+
+                risk:
+                  node.risk ||
+                  'LOW',
+
+                risk_score:
+                  node.risk_score ||
+                  0,
+
+                confidence:
+                  0.85,
+
+                metadata:
+                  node.metadata ||
+                  {},
+
+                source:
+                  'Graph Database',
+
+                cases: [],
+
+                potential_matches: []
+              })
+            ),
+
+        edges:
+          (network.edges || [])
+            .map(
+              (edge, index) => ({
+                id:
+                  edge.id ||
+                  `edge-${index}`,
+
+                source:
+                  edge.source,
+
+                target:
+                  edge.target,
+
+                type:
+                  (
+                    edge.relationship_type ||
+                    'CONNECTED_TO'
+                  ).toUpperCase(),
+
+                label:
+                  edge.relationship_type ||
+                  'Connected',
+
+                confidence:
+                  edge.confidence ||
+                  0.85,
+
+                evidence_id:
+                  null,
+
+                timestamp:
+                  null,
+
+                why_detected:
+                  edge.reason ||
+                  'Connection detected.'
+              })
+            ),
+
+        _raw:
+          data
       };
-  },
+    },
 
-  getCytoscapeElements: async (caseId) => {
-    const graphData = await networkService.getGraph(caseId);
-    return backendGraphToCytoscape(graphData);
-  },
+  getCytoscapeElements:
+    async (caseId) => {
 
-  simulateDisruption: async (targetEntityId) => {
-    return {
-      targetEntityId,
-      before: {
-        totalNodes: 0,
-        totalConnections: 0,
-        networkDensity: 0,
-        connectedComponents: 0,
-        highRiskLinks: 0,
-        keyHubCentrality: 0
-      },
-      after: {
-        totalNodes: 0,
-        totalConnections: 0,
-        networkDensity: 0,
-        connectedComponents: 0,
-        highRiskLinks: 0,
-        keyHubCentrality: 0
-      },
-      impactSummary: 'Disruption simulation requires backend analysis. Backend endpoint not yet implemented.'
-    };
-  }
+      const graph =
+        await networkService.getGraph(
+          caseId
+        );
+
+      return backendGraphToCytoscape(
+        graph
+      );
+    },
+
+  simulateDisruption:
+    async (
+      caseId,
+      targetEntityId
+    ) => {
+
+      const id =
+        Number(caseId);
+
+      if (
+        !Number.isInteger(id) ||
+        id <= 0
+      ) {
+        throw new Error(
+          'Invalid case ID.'
+        );
+      }
+
+      if (!targetEntityId) {
+        throw new Error(
+          'Select an entity.'
+        );
+      }
+
+      return apiGet(
+        `/network/${id}/simulate`,
+        {
+          target_entity_id:
+            targetEntityId
+        }
+      );
+    }
 };
 
 export default networkService;

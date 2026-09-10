@@ -38,10 +38,7 @@ def get_case_network(
         )
 
     # --------------------------------------------------------
-    # Find the most connected people in this case.
-    #
-    # We use a bounded number of primary people so the
-    # frontend receives a manageable Cytoscape graph.
+    # Find primary people
     # --------------------------------------------------------
 
     people_query = """
@@ -103,10 +100,7 @@ def get_case_network(
     ]
 
     # --------------------------------------------------------
-    # Get the bounded network around those people.
-    #
-    # Returning relationship type as a string avoids relying
-    # on Neo4j driver relationship objects in Python.
+    # Get bounded network
     # --------------------------------------------------------
 
     network_query = """
@@ -141,6 +135,7 @@ def get_case_network(
     nodes = {}
 
     for row in people_rows:
+
         person_id = row.get("person_id")
 
         if not person_id:
@@ -155,8 +150,8 @@ def get_case_network(
             row.get("record_connections") or 0
         )
 
-        # Use the actual risk engine for primary people.
         try:
+
             risk_result = calculate_entity_risk(
                 person_id
             )
@@ -174,8 +169,7 @@ def get_case_network(
             )
 
         except Exception:
-            # The graph should still load even if an
-            # individual risk calculation fails.
+
             risk_level = "LOW"
             risk_score = 0
 
@@ -197,8 +191,15 @@ def get_case_network(
     edges = {}
 
     for row in network_rows:
-        source_id = row.get("source_id")
-        target_id = row.get("target_id")
+
+        source_id = row.get(
+            "source_id"
+        )
+
+        target_id = row.get(
+            "target_id"
+        )
+
         relationship_type = row.get(
             "relationship_type"
         )
@@ -209,7 +210,6 @@ def get_case_network(
         if not relationship_type:
             relationship_type = "CONNECTED_TO"
 
-        # Add target node
         target_type = (
             row.get("target_type")
             or "Entity"
@@ -221,6 +221,7 @@ def get_case_network(
         )
 
         if target_id not in nodes:
+
             nodes[target_id] = {
                 "id": target_id,
                 "label": target_label,
@@ -230,7 +231,6 @@ def get_case_network(
                 "metadata": {},
             }
 
-        # Prevent duplicate undirected relationships
         edge_key = tuple(
             sorted(
                 [
@@ -238,7 +238,9 @@ def get_case_network(
                     target_id,
                 ]
             )
-        ) + (relationship_type,)
+        ) + (
+            relationship_type,
+        )
 
         edge_id = "::".join(
             [
@@ -255,7 +257,8 @@ def get_case_network(
             "id": edge_id,
             "source": source_id,
             "target": target_id,
-            "relationship_type": relationship_type,
+            "relationship_type":
+                relationship_type,
             "confidence": 0.8,
             "reason": (
                 "Detected connection in "
@@ -264,11 +267,7 @@ def get_case_network(
         }
 
     # --------------------------------------------------------
-    # Keep graph bounded.
-    #
-    # A person can have many connections in the full
-    # 10K-record graph. We cap the number of edges so
-    # Cytoscape remains responsive.
+    # Keep graph bounded
     # --------------------------------------------------------
 
     max_edges = max(
@@ -280,14 +279,14 @@ def get_case_network(
         edges.values()
     )[:max_edges]
 
-    # Keep only nodes actually participating in the
-    # returned graph.
     used_node_ids = set()
 
     for edge in bounded_edges:
+
         used_node_ids.add(
             edge["source"]
         )
+
         used_node_ids.add(
             edge["target"]
         )
@@ -304,28 +303,33 @@ def get_case_network(
 
     return {
         "success": True,
+
         "data": {
+
             "case": {
                 "id": case.id,
-                "case_number": case.case_number,
-                "title": case.title,
+                "case_number":
+                    case.case_number,
+                "title":
+                    case.title,
             },
 
             "network": {
-                "nodes": bounded_nodes,
-                "edges": bounded_edges,
+                "nodes":
+                    bounded_nodes,
+                "edges":
+                    bounded_edges,
             },
 
             "summary": {
-                "nodes": len(
-                    bounded_nodes
-                ),
-                "edges": len(
-                    bounded_edges
-                ),
-                "primary_entities": len(
-                    person_ids
-                ),
+                "nodes":
+                    len(bounded_nodes),
+
+                "edges":
+                    len(bounded_edges),
+
+                "primary_entities":
+                    len(person_ids),
             },
 
             "analysis_note": (
@@ -339,4 +343,303 @@ def get_case_network(
         "message": (
             "Investigation network retrieved"
         ),
+    }
+
+
+# ============================================================
+# NETWORK DISRUPTION SIMULATION
+# ============================================================
+
+@router.get("/{case_id}/simulate")
+def simulate_disruption(
+
+    case_id: int,
+
+    target_entity_id: str = Query(...),
+
+    db: Session = Depends(
+        get_db
+    ),
+
+    user: User = Depends(
+        get_current_user
+    ),
+):
+
+    # --------------------------------------------------------
+    # Verify case
+    # --------------------------------------------------------
+
+    case = db.get(
+        Case,
+        case_id
+    )
+
+    if not case:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Case not found",
+        )
+
+    # --------------------------------------------------------
+    # Get entity connection counts
+    # --------------------------------------------------------
+
+    query = """
+    MATCH (r:Record {case_id: $case_id})--(p:Person)
+
+    RETURN
+        p.entity_id AS entity_id,
+        count(DISTINCT r) AS connections
+
+    ORDER BY connections DESC
+    """
+
+    rows = neo4j_client.execute(
+        query,
+        case_id=case_id,
+    )
+
+    # --------------------------------------------------------
+    # Empty network
+    # --------------------------------------------------------
+
+    if not rows:
+
+        return {
+
+            "success": True,
+
+            "data": {
+
+                "targetEntityId":
+                    target_entity_id,
+
+                "before": {
+
+                    "totalNodes": 0,
+                    "totalConnections": 0,
+                    "networkDensity": 0,
+                    "connectedComponents": 0,
+                    "highRiskLinks": 0,
+                    "keyHubCentrality": 0,
+                },
+
+                "after": {
+
+                    "totalNodes": 0,
+                    "totalConnections": 0,
+                    "networkDensity": 0,
+                    "connectedComponents": 0,
+                    "highRiskLinks": 0,
+                    "keyHubCentrality": 0,
+                },
+
+                "impactSummary":
+                    "No network data available for this case.",
+
+                "impactLevel":
+                    "LOW",
+            },
+
+            "message":
+                "Network disruption simulation completed.",
+        }
+
+    # --------------------------------------------------------
+    # Calculate BEFORE values
+    # --------------------------------------------------------
+
+    total_nodes = len(rows)
+
+    total_connections = sum(
+        int(
+            row.get("connections") or 0
+        )
+        for row in rows
+    )
+
+    before_density = (
+        total_connections
+        /
+        max(
+            total_nodes *
+            max(total_nodes - 1, 1),
+            1,
+        )
+    )
+
+    # --------------------------------------------------------
+    # Find selected entity
+    # --------------------------------------------------------
+
+    target_connections = 0
+
+    for row in rows:
+
+        if (
+            row.get("entity_id")
+            ==
+            target_entity_id
+        ):
+
+            target_connections = int(
+                row.get(
+                    "connections"
+                ) or 0
+            )
+
+            break
+
+    # --------------------------------------------------------
+    # Calculate AFTER values
+    # --------------------------------------------------------
+
+    after_nodes = max(
+        total_nodes - 1,
+        0,
+    )
+
+    after_connections = max(
+        total_connections -
+        target_connections,
+        0,
+    )
+
+    after_density = (
+
+        after_connections
+        /
+        max(
+            after_nodes *
+            max(after_nodes - 1, 1),
+            1,
+        )
+
+        if after_nodes > 1
+
+        else 0
+    )
+
+    # --------------------------------------------------------
+    # Calculate impact
+    # --------------------------------------------------------
+
+    impact_percent = (
+
+        target_connections
+        /
+        max(
+            total_connections,
+            1,
+        )
+
+    ) * 100
+
+    if impact_percent >= 40:
+
+        impact = "CRITICAL"
+
+    elif impact_percent >= 20:
+
+        impact = "HIGH"
+
+    elif impact_percent >= 10:
+
+        impact = "MEDIUM"
+
+    else:
+
+        impact = "LOW"
+
+    # --------------------------------------------------------
+    # Response
+    # --------------------------------------------------------
+
+    return {
+
+        "success": True,
+
+        "data": {
+
+            "targetEntityId":
+                target_entity_id,
+
+            "before": {
+
+                "totalNodes":
+                    total_nodes,
+
+                "totalConnections":
+                    total_connections,
+
+                "networkDensity":
+                    round(
+                        before_density,
+                        4,
+                    ),
+
+                "connectedComponents":
+                    1,
+
+                "highRiskLinks":
+                    0,
+
+                "keyHubCentrality":
+                    round(
+                        target_connections
+                        /
+                        max(
+                            total_connections,
+                            1,
+                        ),
+                        4,
+                    ),
+            },
+
+            "after": {
+
+                "totalNodes":
+                    after_nodes,
+
+                "totalConnections":
+                    after_connections,
+
+                "networkDensity":
+                    round(
+                        after_density,
+                        4,
+                    ),
+
+                "connectedComponents":
+                    1
+                    if after_nodes
+                    else 0,
+
+                "highRiskLinks":
+                    0,
+
+                "keyHubCentrality":
+                    0,
+            },
+
+            "impactSummary":
+                (
+                    f"Removing "
+                    f"{target_entity_id} "
+                    f"removes approximately "
+                    f"{impact_percent:.1f}% "
+                    f"of observed network "
+                    f"connections. "
+                    f"Estimated disruption "
+                    f"impact: {impact}."
+                ),
+
+            "impactLevel":
+                impact,
+        },
+
+        "message":
+            "Network disruption simulation completed.",
     }

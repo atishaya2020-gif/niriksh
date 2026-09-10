@@ -1,126 +1,346 @@
-import React, { useEffect, useState } from 'react';
-import { FileText, Sparkles, AlertCircle, Download, CheckCircle2 } from 'lucide-react';
+import React, {
+  useEffect,
+  useState
+} from 'react';
+
+import {
+  Sparkles,
+  AlertCircle,
+  Download
+} from 'lucide-react';
+
 import GlassCard from '../components/ui/GlassCard';
 import Button from '../components/ui/Button';
 import Select from '../components/ui/Select';
-import Toast from '../components/ui/Toast';
+
 import reportService from '../services/reportService';
+import caseService from '../services/caseService';
 
 export const ReportsPage = () => {
-  const [reports, setReports] = useState([]);
-  const [reportType, setReportType] = useState('Network Analysis Report');
-  const [caseId, setCaseId] = useState('C-1024');
-  const [activeReport, setActiveReport] = useState(null);
-  const [generating, setGenerating] = useState(false);
+
+  const [cases, setCases] =
+    useState([]);
+
+  const [caseId, setCaseId] =
+    useState('');
+
+  const [reportType, setReportType] =
+    useState(
+      'Network Analysis Report'
+    );
+
+  const [activeReport, setActiveReport] =
+    useState(null);
+
+  const [generating, setGenerating] =
+    useState(false);
+
+  const [error, setError] =
+    useState('');
 
   useEffect(() => {
-    const loadReports = async () => {
-      const data = await reportService.getReports();
-      setReports(data);
-      if (data.length > 0) setActiveReport(data[0]);
-    };
-    loadReports();
+
+    const loadCases =
+      async () => {
+
+        try {
+
+          const data =
+            await caseService.getCases();
+
+          setCases(data);
+
+          if (data.length > 0) {
+            setCaseId(
+              String(data[0].id)
+            );
+          }
+
+        } catch (err) {
+
+          setError(
+            err.message ||
+            'Unable to load cases.'
+          );
+        }
+      };
+
+    loadCases();
+
   }, []);
 
-  const handleGenerate = async () => {
-    setGenerating(true);
-    const newRpt = await reportService.generateReport(reportType, caseId);
-    setReports((prev) => [newRpt, ...prev]);
-    setActiveReport(newRpt);
-    setGenerating(false);
-  };
+  const handleGenerate =
+    async () => {
+
+      if (!caseId) {
+        setError(
+          'Please select a case.'
+        );
+        return;
+      }
+
+      setGenerating(true);
+      setError('');
+
+      try {
+
+        const report =
+          await reportService.generateReport(
+            reportType,
+            caseId
+          );
+
+        setActiveReport(report);
+
+      } catch (err) {
+
+        setError(
+          err.message ||
+          'Unable to generate report.'
+        );
+
+      } finally {
+
+        setGenerating(false);
+      }
+    };
+
+  const downloadReport =
+    () => {
+
+      if (!activeReport) {
+        return;
+      }
+
+      const text = [
+        activeReport.title,
+        '',
+        activeReport.summary,
+        '',
+        ...activeReport.sections.map(
+          (section) =>
+            `${section.heading}\n${section.content}\n`
+        ),
+        '',
+        activeReport.disclaimer
+      ].join('\n');
+
+      const blob =
+        new Blob(
+          [text],
+          {
+            type:
+              'text/plain'
+          }
+        );
+
+      const url =
+        URL.createObjectURL(
+          blob
+        );
+
+      const anchor =
+        document.createElement(
+          'a'
+        );
+
+      anchor.href = url;
+
+      anchor.download =
+        `${activeReport.id}.txt`;
+
+      anchor.click();
+
+      URL.revokeObjectURL(
+        url
+      );
+    };
 
   return (
+
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-purple-900/30 pb-4">
-        <div>
-          <h1 className="text-2xl font-extrabold text-white font-mono-id tracking-tight">
-            INTELLIGENCE DOSSIER REPORT GENERATOR
-          </h1>
-          <p className="text-xs text-purple-300/70 font-mono-id mt-1">
-            Automated analytical report builder for court filing and senior investigator reviews
-          </p>
-        </div>
+
+      <div className="border-b border-purple-900/30 pb-4">
+
+        <h1 className="text-2xl font-extrabold text-white font-mono-id">
+          INTELLIGENCE DOSSIER REPORT GENERATOR
+        </h1>
+
+        <p className="text-xs text-purple-300/70 font-mono-id mt-1">
+          Generate investigation reports from live case data
+        </p>
+
       </div>
 
-      {/* Generator Controls */}
-      <GlassCard hoverEffect={false} className="p-4 space-y-4">
+      <GlassCard
+        hoverEffect={false}
+        className="p-4 space-y-4"
+      >
+
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
+
           <Select
-            label="Report Dossier Type"
+            label="Report Type"
             value={reportType}
-            onChange={(e) => setReportType(e.target.value)}
+            onChange={(e) =>
+              setReportType(
+                e.target.value
+              )
+            }
             options={[
-              { value: 'Case Summary', label: 'Case Summary Dossier' },
-              { value: 'Network Analysis Report', label: 'Network Analysis & Graph Topology' },
-              { value: 'Entity Relationship Report', label: 'Entity Relationship Synthesis' },
-              { value: 'Alert Summary', label: 'Alert Anomaly Summary' },
-              { value: 'Investigation Timeline', label: 'Investigation Timeline Log' },
-              { value: 'Cross-Case Analysis', label: 'Cross-Case Entity Overlap' }
+              {
+                value:
+                  'Case Summary',
+                label:
+                  'Case Summary'
+              },
+              {
+                value:
+                  'Network Analysis Report',
+                label:
+                  'Network Analysis'
+              },
+              {
+                value:
+                  'Entity Relationship Report',
+                label:
+                  'Entity Relationship'
+              },
+              {
+                value:
+                  'Alert Summary',
+                label:
+                  'Alert Summary'
+              }
             ]}
           />
 
           <Select
-            label="Target Case File"
+            label="Target Case"
             value={caseId}
-            onChange={(e) => setCaseId(e.target.value)}
-            options={[
-              { value: 'C-1024', label: 'C-1024 • Operation Alpha' },
-              { value: 'C-1041', label: 'C-1041 • Drug Trafficking Network' },
-              { value: 'C-1088', label: 'C-1088 • Financial Fraud' }
-            ]}
+            onChange={(e) =>
+              setCaseId(
+                e.target.value
+              )
+            }
+            options={
+              cases.map(
+                (item) => ({
+                  value:
+                    String(item.id),
+
+                  label:
+                    `${item.case_number} • ${item.title}`
+                })
+              )
+            }
           />
 
           <Button
             variant="cyan"
             icon={Sparkles}
-            disabled={generating}
-            onClick={handleGenerate}
+            disabled={
+              generating ||
+              !caseId
+            }
+            onClick={
+              handleGenerate
+            }
           >
-            {generating ? 'SYNTHESIZING REPORT...' : 'GENERATE DOSSIER REPORT'}
+            {generating
+              ? 'GENERATING...'
+              : 'GENERATE REPORT'}
           </Button>
+
         </div>
+
+        {error && (
+          <div className="p-3 rounded-xl border border-red-500/40 bg-red-950/30 text-red-300 text-xs flex gap-2">
+
+            <AlertCircle className="w-4 h-4" />
+
+            {error}
+
+          </div>
+        )}
+
       </GlassCard>
 
-      {/* Report Preview Section */}
       {activeReport && (
-        <GlassCard hoverEffect={false} glow glowColor="purple" className="p-6 sm:p-8 space-y-6">
+
+        <GlassCard
+          hoverEffect={false}
+          className="p-6 sm:p-8 space-y-6"
+        >
+
           <div className="flex items-start justify-between border-b border-purple-900/40 pb-4">
+
             <div>
-              <span className="text-xs font-mono-id font-bold text-cyan-400 uppercase">
-                {activeReport.report_type} • {activeReport.id}
+
+              <span className="text-xs font-mono-id font-bold text-cyan-400">
+                {activeReport.report_type}
               </span>
-              <h2 className="text-xl font-extrabold text-white mt-1">{activeReport.title}</h2>
-              <p className="text-xs text-purple-300/70 font-mono-id mt-0.5">
-                Generated By: {activeReport.generated_by} • Date: {activeReport.generated_date}
+
+              <h2 className="text-xl font-extrabold text-white mt-1">
+                {activeReport.title}
+              </h2>
+
+              <p className="text-xs text-purple-300/70 mt-1">
+                Generated: {activeReport.generated_date}
               </p>
+
             </div>
 
-            <Button variant="secondary" size="sm" icon={Download}>
-              Download Mock PDF
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={Download}
+              onClick={
+                downloadReport
+              }
+            >
+              DOWNLOAD REPORT
             </Button>
+
           </div>
 
-          {/* Prototype Disclaimer Banner */}
-          <div className="p-3 bg-purple-950/60 rounded-xl border border-purple-500/30 text-xs font-mono-id text-purple-200 flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-cyan-400 flex-shrink-0" />
-            <span>{activeReport.disclaimer}</span>
+          <div className="p-3 bg-purple-950/60 rounded-xl border border-purple-500/30 text-xs text-purple-200">
+
+            <AlertCircle className="w-4 h-4 text-cyan-400 inline mr-2" />
+
+            {activeReport.disclaimer}
+
           </div>
 
-          {/* Report Sections */}
           <div className="space-y-4 font-mono-id text-xs">
-            {activeReport.sections.map((sec, idx) => (
-              <div key={idx} className="p-4 bg-slate-950/60 rounded-xl border border-purple-900/30 space-y-1">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-cyan-300">
-                  {sec.heading}
-                </h4>
-                <p className="text-purple-200 leading-relaxed">{sec.content}</p>
-              </div>
-            ))}
+
+            {activeReport.sections.map(
+              (section, index) => (
+
+                <div
+                  key={index}
+                  className="p-4 bg-slate-950/60 rounded-xl border border-purple-900/30"
+                >
+
+                  <h4 className="text-xs font-bold text-cyan-300 mb-2">
+                    {section.heading}
+                  </h4>
+
+                  <p className="text-purple-200 leading-relaxed">
+                    {section.content}
+                  </p>
+
+                </div>
+
+              )
+            )}
+
           </div>
+
         </GlassCard>
+
       )}
+
     </div>
   );
 };

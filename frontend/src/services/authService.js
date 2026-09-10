@@ -1,63 +1,167 @@
-import { apiPost, apiGet } from './api';
+import {
+  apiPost,
+  apiGet
+} from './api';
 
-const TOKEN_KEY = 'niriksh_auth_token';
-const USER_KEY = 'niriksh_current_user';
+const TOKEN_KEY =
+  'niriksh_auth_token';
+
+const USER_KEY =
+  'niriksh_current_user';
 
 export const authService = {
-  login: async (credential, password) => {
-    try {
-      const response = await apiPost('/auth/login', {
-        username: credential,
-        password: password
-      });
 
-      const token = response.access_token;
-      localStorage.setItem(TOKEN_KEY, token);
+  login:
+    async (
+      credential,
+      password
+    ) => {
 
-      const user = await apiGet('/auth/me');
-      localStorage.setItem(USER_KEY, JSON.stringify(user));
+      try {
 
-      return { success: true, user, token };
-    } catch (error) {
+        const response =
+          await apiPost(
+            '/auth/login',
+            {
+              username:
+                credential,
+
+              password
+            }
+          );
+
+        const token =
+          response.access_token;
+
+        localStorage.setItem(
+          TOKEN_KEY,
+          token
+        );
+
+        const user =
+          await apiGet(
+            '/auth/me'
+          );
+
+        localStorage.setItem(
+          USER_KEY,
+          JSON.stringify(user)
+        );
+
+        return {
+          success: true,
+          user,
+          token
+        };
+
+      } catch (error) {
+
+        return {
+          success: false,
+
+          message:
+            error.message ||
+            'Invalid credentials.'
+        };
+      }
+    },
+
+  logout:
+    async () => {
+
+      localStorage.removeItem(
+        TOKEN_KEY
+      );
+
+      localStorage.removeItem(
+        USER_KEY
+      );
+
       return {
-        success: false,
-        message: error.message || 'Invalid credentials. Please try again.'
+        success: true
       };
+    },
+
+  getCurrentUser:
+    () => {
+
+      try {
+
+        const value =
+          localStorage.getItem(
+            USER_KEY
+          );
+
+        return value
+          ? JSON.parse(value)
+          : null;
+
+      } catch {
+
+        return null;
+      }
+    },
+
+  setCurrentUser:
+    (user) => {
+
+      localStorage.setItem(
+        USER_KEY,
+        JSON.stringify(user)
+      );
+    },
+
+  isAuthenticated:
+    () =>
+      Boolean(
+        localStorage.getItem(
+          TOKEN_KEY
+        )
+      ),
+
+  getToken:
+    () =>
+      localStorage.getItem(
+        TOKEN_KEY
+      ),
+
+  requestAccess:
+    async (
+      payload
+    ) => {
+
+      try {
+
+        const response =
+          await apiPost(
+            '/access/request',
+            payload
+          );
+
+        return {
+          success:
+            response?.success !==
+            false,
+
+          data:
+            response?.data,
+
+          message:
+            response?.message ||
+            'Access request submitted.'
+        };
+
+      } catch (error) {
+
+        return {
+          success: false,
+
+          message:
+            error.message ||
+            'Unable to submit access request.'
+        };
+      }
     }
-  },
-
-  logout: async () => {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
-    return { success: true };
-  },
-
-  getCurrentUser: () => {
-    try {
-      const userStr = localStorage.getItem(USER_KEY);
-      if (!userStr) return null;
-      return JSON.parse(userStr);
-    } catch (e) {
-      return null;
-    }
-  },
-
-  setCurrentUser: (user) => {
-    localStorage.setItem(USER_KEY, JSON.stringify(user));
-  },
-
-  isAuthenticated: () => {
-    return !!localStorage.getItem(TOKEN_KEY);
-  },
-
-  getToken: () => {
-    return localStorage.getItem(TOKEN_KEY);
-  },
-
-  requestAccess: async () => ({
-    success: false,
-    message: 'Access requests are not supported by the current backend API.'
-  })
 };
 
 export default authService;
