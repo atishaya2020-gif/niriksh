@@ -1,3 +1,5 @@
+# Development-only local dependencies. Do not use this file for staging or production.
+# Its fixed credentials preserve the existing local Docker volumes and development workflow.
 services:
   postgres:
     image: postgres:16

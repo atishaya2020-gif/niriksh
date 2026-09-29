@@ -45,9 +45,11 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for component responsibilities 
 copy .env.example .env
 ```
 
-Set local credentials and a strong `SECRET_KEY` in `.env`. Do not commit this file.
+Set local credentials in `.env`. Do not commit this file. `ENVIRONMENT=development` preserves local defaults; `staging` and `production` require a non-default `SECRET_KEY` of at least 32 characters, a non-default `ADMIN_PASSWORD`, a non-default `NEO4J_PASSWORD`, and explicitly configured non-localhost `CORS_ORIGINS`.
 
 ### 2. Start PostgreSQL and Neo4j
+
+`docker-compose.yml` is development-only and uses local credentials to preserve the existing named volumes. Do not use it for staging or production.
 
 ```powershell
 docker compose up -d
