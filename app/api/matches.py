@@ -13,6 +13,11 @@ from app.db.neo4j import neo4j_client
 from app.db.postgres import get_db
 from app.schemas.matches import EntityMatchResponse, MatchReview
 from app.services.matching_service import generate_case_entity_matches
+from app.services.authorization import (
+    get_authorized_case,
+    get_authorized_case_ids,
+    authorize_resource_case,
+)
 
 router = APIRouter(prefix="/matches", tags=["Entity Matching"])
 
@@ -27,6 +32,12 @@ def list_matches(
     user: User = Depends(get_current_user),
 ):
     query = db.query(EntityMatch)
+
+    # Restrict matches to authorized cases (no global leak)
+    if user.role != "SUPER_ADMIN":
+        authorized_ids = get_authorized_case_ids(db, user, "match:view")
+        query = query.filter(EntityMatch.case_id.in_(authorized_ids))
+
     if case_id is not None:
         query = query.filter(EntityMatch.case_id == case_id)
     if status:
@@ -60,6 +71,9 @@ def get_match(
     match = db.get(EntityMatch, match_id)
     if not match:
         raise HTTPException(status_code=404, detail="Entity match not found")
+
+    # Resolve owning case before returning match details
+    authorize_resource_case(db, user, match.case_id, "match:view", "Entity match")
     return match
 
 
@@ -73,6 +87,9 @@ def review_match(
     match = db.get(EntityMatch, match_id)
     if not match:
         raise HTTPException(status_code=404, detail="Entity match not found")
+
+    # Resolve owning case and require match:review BEFORE mutation
+    get_authorized_case(db, user, match.case_id, "match:review")
 
     status = payload.status.upper()
     if status not in MATCH_STATUSES:
@@ -135,9 +152,8 @@ def generate_matches_for_case(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    case = db.get(Case, case_id)
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
+    # Authorize before any Neo4j query or match creation side effect
+    get_authorized_case(db, user, case_id, "match:review")
 
     matches = generate_case_entity_matches(db, case_id)
     return {

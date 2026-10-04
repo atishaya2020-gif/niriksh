@@ -32,3 +32,6 @@ temp/
 data/processing_test*.csv
 data/test*.csv
 *.sql
+
+# Local database backups
+backups/

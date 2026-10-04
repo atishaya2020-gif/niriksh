@@ -18,39 +18,37 @@ router = APIRouter(
 # Entity Search
 # ============================================================
 
+from app.services.authorization import get_authorized_case_ids
+from app.db.neo4j import get_provenance_filter
+
 @router.get("")
 def list_entities(
     entity_type: str | None = None,
     search: str | None = None,
-    limit: int = Query(
-        100,
-        ge=1,
-        le=500,
-    ),
+    limit: int = Query(100, ge=1, le=500),
     user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
-    query = """
+    authorized_case_ids = list(get_authorized_case_ids(db, user, "network:view"))
+    is_super_admin = (user.role == "SUPER_ADMIN")
+
+    if not authorized_case_ids and not is_super_admin:
+        return []
+
+    provenance_filter = get_provenance_filter()
+    query = f"""
     MATCH (n)
     WHERE ($entity_type IS NULL OR $entity_type IN labels(n))
-      AND (
-          $search IS NULL
-          OR toLower(
-              coalesce(
-                  n.name,
-                  n.value,
-                  n.entity_id
-              )
-          ) CONTAINS toLower($search)
-      )
+      AND ($search IS NULL OR toLower(coalesce(n.name, n.value, n.entity_id)) CONTAINS toLower($search))
+      AND ($is_super_admin = true OR EXISTS {{
+          MATCH (n)-[r]-(rel_target)
+          WHERE {provenance_filter}
+      }})
 
     RETURN
         n.entity_id AS id,
         labels(n)[0] AS type,
-        coalesce(
-            n.name,
-            n.value,
-            n.entity_id
-        ) AS label,
+        coalesce(n.name, n.value, n.entity_id) AS label,
         properties(n) AS properties
 
     ORDER BY type, label
@@ -62,6 +60,8 @@ def list_entities(
         entity_type=entity_type,
         search=search,
         limit=limit,
+        authorized_case_ids=authorized_case_ids,
+        is_super_admin=is_super_admin
     )
 
 
@@ -79,21 +79,28 @@ def get_entity(
     # Basic entity information
     # --------------------------------------------------------
 
-    rows = neo4j_client.execute(
-        """
-        MATCH (n {entity_id: $entity_id})
+    authorized_case_ids = list(get_authorized_case_ids(db, user, "network:view"))
+    is_super_admin = (user.role == "SUPER_ADMIN")
+    provenance_filter = get_provenance_filter()
 
-        RETURN
-            n.entity_id AS id,
-            labels(n)[0] AS type,
-            coalesce(
-                n.name,
-                n.value,
-                n.entity_id
-            ) AS label,
-            properties(n) AS properties
-        """,
+    query = f"""
+    MATCH (n {{entity_id: $entity_id}})
+    WHERE ($is_super_admin = true OR EXISTS {{
+        MATCH (n)-[r]-(rel_target)
+        WHERE {provenance_filter}
+    }})
+    RETURN
+        n.entity_id AS id,
+        labels(n)[0] AS type,
+        coalesce(n.name, n.value, n.entity_id) AS label,
+        properties(n) AS properties
+    """
+
+    rows = neo4j_client.execute(
+        query,
         entity_id=entity_id,
+        authorized_case_ids=authorized_case_ids,
+        is_super_admin=is_super_admin
     )
 
     if not rows:
@@ -108,15 +115,20 @@ def get_entity(
     # Explainable risk analysis
     # --------------------------------------------------------
 
-    risk = calculate_entity_risk(entity_id)
+    risk = calculate_entity_risk(
+        entity_id,
+        authorized_case_ids=authorized_case_ids,
+        is_super_admin=is_super_admin,
+    )
 
     # --------------------------------------------------------
     # Connection summary
     # --------------------------------------------------------
 
-    connection_summary_query = """
-    MATCH (n {entity_id: $entity_id})-[r]-(other)
+    connection_summary_query = f"""
+    MATCH (n {{entity_id: $entity_id}})-[r]-(other)
     WHERE type(r) <> 'MATCHED_WITH'
+      AND ($is_super_admin = true OR {provenance_filter})
 
     RETURN
         type(r) AS relationship_type,
@@ -129,6 +141,8 @@ def get_entity(
     connection_rows = neo4j_client.execute(
         connection_summary_query,
         entity_id=entity_id,
+        authorized_case_ids=authorized_case_ids,
+        is_super_admin=is_super_admin,
     )
 
     connection_summary = [
@@ -144,8 +158,9 @@ def get_entity(
     # Case associations
     # --------------------------------------------------------
 
-    case_query = """
-    MATCH (r:Record)--(n {entity_id: $entity_id})
+    case_query = f"""
+    MATCH (r:Record)-[rel]-(n {{entity_id: $entity_id}})
+    WHERE $is_super_admin = true OR (rel.case_id IN $authorized_case_ids OR ANY(c IN rel.evidence_case_ids WHERE c IN $authorized_case_ids))
 
     RETURN DISTINCT r.case_id AS case_id
 
@@ -155,6 +170,8 @@ def get_entity(
     case_rows = neo4j_client.execute(
         case_query,
         entity_id=entity_id,
+        authorized_case_ids=authorized_case_ids,
+        is_super_admin=is_super_admin,
     )
 
     case_ids = [
@@ -188,8 +205,9 @@ def get_entity(
     # Entity timeline
     # --------------------------------------------------------
 
-    timeline_query = """
-    MATCH (r:Record)--(n {entity_id: $entity_id})
+    timeline_query = f"""
+    MATCH (r:Record)-[rel]-(n {{entity_id: $entity_id}})
+    WHERE $is_super_admin = true OR (rel.case_id IN $authorized_case_ids OR ANY(c IN rel.evidence_case_ids WHERE c IN $authorized_case_ids))
 
     RETURN DISTINCT
         r.record_id AS record_id,
@@ -203,6 +221,8 @@ def get_entity(
     timeline_rows = neo4j_client.execute(
         timeline_query,
         entity_id=entity_id,
+        authorized_case_ids=authorized_case_ids,
+        is_super_admin=is_super_admin,
     )
 
     record_pairs = {
@@ -221,13 +241,10 @@ def get_entity(
             for _, record_id in record_pairs
         ]
 
-        records = (
-            db.query(RawRecord)
-            .filter(
-                RawRecord.record_id.in_(record_ids)
-            )
-            .all()
-        )
+        records_query = db.query(RawRecord).filter(RawRecord.record_id.in_(record_ids))
+        if not is_super_admin:
+            records_query = records_query.filter(RawRecord.case_id.in_(authorized_case_ids))
+        records = records_query.all()
 
         for record in records:
             if (
@@ -261,17 +278,10 @@ def get_entity(
     # Related alerts
     # --------------------------------------------------------
 
-    alerts = (
-        db.query(Alert)
-        .filter(
-            Alert.entity_id == entity_id
-        )
-        .order_by(
-            Alert.created_at.desc()
-        )
-        .limit(20)
-        .all()
-    )
+    alerts_query = db.query(Alert).filter(Alert.entity_id == entity_id)
+    if not is_super_admin:
+        alerts_query = alerts_query.filter(Alert.case_id.in_(authorized_case_ids))
+    alerts = alerts_query.order_by(Alert.created_at.desc()).limit(20).all()
 
     alert_data = [
         {
@@ -374,28 +384,27 @@ def get_entity(
 @router.get("/{entity_id}/connections")
 def entity_connections(
     entity_id: str,
-    limit: int = Query(
-        100,
-        ge=1,
-        le=500,
-    ),
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    query = """
-    MATCH (n {entity_id: $entity_id})-[r]-(other)
+    authorized_case_ids = list(get_authorized_case_ids(db, user, "network:view"))
+    is_super_admin = (user.role == "SUPER_ADMIN")
+    if not authorized_case_ids and not is_super_admin:
+        return []
+    provenance_filter = get_provenance_filter()
 
+    query = f"""
+    MATCH (n {{entity_id: $entity_id}})-[r]-(other)
+    WHERE type(r) <> 'MATCHED_WITH'
+      AND ($is_super_admin = true OR (r.case_id IN $authorized_case_ids OR ANY(c IN r.evidence_case_ids WHERE c IN $authorized_case_ids)))
     RETURN
         other.entity_id AS id,
         labels(other)[0] AS type,
-        coalesce(
-            other.name,
-            other.value,
-            other.entity_id
-        ) AS label,
+        coalesce(other.name, other.value, other.entity_id) AS label,
         properties(other) AS properties,
         type(r) AS relationship_type,
         properties(r) AS relationship_properties
-
     ORDER BY relationship_type, label
     LIMIT $limit
     """
@@ -404,6 +413,8 @@ def entity_connections(
         query,
         entity_id=entity_id,
         limit=limit,
+        authorized_case_ids=authorized_case_ids,
+        is_super_admin=is_super_admin
     )
 
 
@@ -417,17 +428,27 @@ def entity_timeline(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    rows = neo4j_client.execute(
-        """
-        MATCH (r:Record)-[]-(n {
-            entity_id: $entity_id
-        })
+    authorized_case_ids = list(get_authorized_case_ids(db, user, "network:view"))
+    is_super_admin = (user.role == "SUPER_ADMIN")
+    if not authorized_case_ids and not is_super_admin:
+        return []
+    provenance_filter = get_provenance_filter()
 
-        RETURN DISTINCT
-            r.record_id AS record_id,
-            r.case_id AS case_id
-        """,
+    query = f"""
+    MATCH (r:Record)-[rel:MENTIONS]-(n {{entity_id: $entity_id}})
+    WHERE ($is_super_admin = true OR (rel.case_id IN $authorized_case_ids OR ANY(c IN rel.evidence_case_ids WHERE c IN $authorized_case_ids)))
+    RETURN DISTINCT
+        r.record_id AS record_id,
+        r.case_id AS case_id
+    ORDER BY r.case_id DESC
+    LIMIT 50
+    """
+
+    rows = neo4j_client.execute(
+        query,
         entity_id=entity_id,
+        authorized_case_ids=authorized_case_ids,
+        is_super_admin=is_super_admin
     )
 
     if not rows:

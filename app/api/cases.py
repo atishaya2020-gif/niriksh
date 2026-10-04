@@ -6,6 +6,12 @@ from app.db.models import Alert, Case, Evidence, RawRecord, User
 from app.db.neo4j import neo4j_client
 from app.db.postgres import get_db
 from app.schemas.case import CaseCreate, CaseResponse
+from app.services.authorization import (
+    require_global_capability,
+    get_authorized_case,
+    require_case_capability,
+    get_authorized_case_ids,
+)
 
 
 router = APIRouter(
@@ -20,6 +26,8 @@ def create_case(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    require_global_capability(user, "case:create")
+
     case = Case(
         **payload.model_dump(),
         created_by=user.id,
@@ -37,8 +45,13 @@ def list_cases(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    if user.role == "SUPER_ADMIN":
+        return db.query(Case).order_by(Case.id.desc()).all()
+
+    authorized_ids = get_authorized_case_ids(db, user, "case:view")
     return (
         db.query(Case)
+        .filter(Case.id.in_(authorized_ids))
         .order_by(Case.id.desc())
         .all()
     )
@@ -50,15 +63,34 @@ def get_case(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    case = db.get(Case, case_id)
+    return get_authorized_case(db, user, case_id, "case:view")
 
-    if not case:
-        raise HTTPException(
-            status_code=404,
-            detail="Case not found",
-        )
 
+@router.patch("/{case_id}", response_model=CaseResponse)
+def update_case(
+    case_id: int,
+    payload: CaseCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    case = get_authorized_case(db, user, case_id, "case:update")
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        setattr(case, key, value)
+    db.commit()
+    db.refresh(case)
     return case
+
+
+@router.delete("/{case_id}")
+def delete_case(
+    case_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    case = get_authorized_case(db, user, case_id, "case:update")
+    db.delete(case)
+    db.commit()
+    return {"message": "Case deleted"}
 
 
 @router.get("/{case_id}/overview")
@@ -67,16 +99,7 @@ def get_case_overview(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    case = db.get(Case, case_id)
-
-    if not case:
-        raise HTTPException(
-            status_code=404,
-            detail="Case not found",
-        )
-
-    # ---------------------------------------------------------
-    # PostgreSQL metrics
+    case = get_authorized_case(db, user, case_id, "case:view")
     # ---------------------------------------------------------
 
     record_count = (
@@ -246,9 +269,7 @@ def get_case_timeline(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    case = db.get(Case, case_id)
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
+    case = get_authorized_case(db, user, case_id, "case:view")
 
     events = []
 

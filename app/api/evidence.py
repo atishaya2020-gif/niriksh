@@ -18,6 +18,11 @@ from app.schemas.evidence import (
     EvidenceResponse,
     EvidenceVerify,
 )
+from app.services.authorization import (
+    get_authorized_case,
+    get_authorized_case_ids,
+    authorize_resource_case,
+)
 
 router = APIRouter(prefix="/evidence", tags=["Evidence"])
 
@@ -29,9 +34,8 @@ def create_evidence(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    case = db.get(Case, case_id)
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
+    # Authorize before any side effect
+    get_authorized_case(db, user, case_id, "evidence:create")
 
     evidence_type = payload.evidence_type.upper()
     if evidence_type not in EVIDENCE_TYPES:
@@ -84,9 +88,8 @@ def list_case_evidence(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    case = db.get(Case, case_id)
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
+    # Authorize case access before returning evidence
+    get_authorized_case(db, user, case_id, "case:view")
 
     query = db.query(Evidence).filter(Evidence.case_id == case_id)
 
@@ -125,6 +128,9 @@ def get_evidence(
     evidence = db.get(Evidence, evidence_id)
     if not evidence:
         raise HTTPException(status_code=404, detail="Evidence not found")
+
+    # Resolve owning case before returning evidence
+    authorize_resource_case(db, user, evidence.case_id, "case:view", "Evidence")
     return evidence
 
 
@@ -138,6 +144,9 @@ def verify_evidence(
     evidence = db.get(Evidence, evidence_id)
     if not evidence:
         raise HTTPException(status_code=404, detail="Evidence not found")
+
+    # Resolve owning case and require evidence:verify BEFORE changing state
+    get_authorized_case(db, user, evidence.case_id, "evidence:verify")
 
     status = payload.status.upper()
     if status not in VERIFICATION_STATUSES:

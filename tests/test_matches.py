@@ -2,49 +2,18 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
-import sys
+from starlette.testclient import TestClient
+
+from app.api.matches import get_current_user as matches_get_current_user
+from app.api.matches import get_db as matches_get_db
+from app.main import app
+
 
 class DummyUser:
     id = 1
     username = "test_investigator"
-    role = "investigator"
+    role = "SUPER_ADMIN"
     is_active = True
-
-neo4j_mock = MagicMock()
-neo4j_mock.GraphDatabase.driver.return_value = MagicMock()
-sys.modules["neo4j"] = neo4j_mock
-
-import app.db.neo4j as _n4j_mod
-_n4j_mod.neo4j_client = MagicMock()
-
-import app.db.postgres as _pg_mod
-_pg_mod.engine = MagicMock()
-_pg_mod.SessionLocal = MagicMock(return_value=MagicMock(
-    query=MagicMock(return_value=MagicMock(
-        filter=MagicMock(return_value=MagicMock(
-            first=MagicMock(return_value=None),
-            all=MagicMock(return_value=[]),
-            count=MagicMock(return_value=0),
-        ))
-    )),
-    get=MagicMock(return_value=None),
-    add=MagicMock(),
-    commit=MagicMock(),
-    refresh=MagicMock(),
-    close=MagicMock(),
-))
-
-import app.main as _main_mod
-_main_mod.Base.metadata.create_all = MagicMock()
-_main_mod.auth.seed_admin = MagicMock()
-_main_mod.neo4j_client = MagicMock()
-
-# Mock get_current_user before importing app modules that use it
-import app.core.security as _sec_mod
-_sec_mod.get_current_user = MagicMock(return_value=DummyUser())
-
-from starlette.testclient import TestClient
-from app.main import app
 
 
 class FakeCase:
@@ -145,65 +114,71 @@ class EntityMatchingAPITests(unittest.TestCase):
     def setUpClass(cls):
         cls.client = TestClient(app)
 
+    def authenticate(self, session=None):
+        session = session or FakeSession()
+        app.dependency_overrides[matches_get_current_user] = lambda: DummyUser()
+        app.dependency_overrides[matches_get_db] = lambda: session
+        self.addCleanup(app.dependency_overrides.clear)
+        return session
+
     @patch("app.api.matches.get_db")
     @patch("app.core.security.get_db")
     def test_list_matches(self, mock_sec_db, mock_api_db):
-        session = FakeSession()
+        session = self.authenticate()
         mock_api_db.return_value = session
         mock_sec_db.return_value = session
-        with patch("app.core.security.get_current_user", return_value=DummyUser()):
-            res = self.client.get("/api/matches")
-            self.assertEqual(res.status_code, 200)
-            data = res.json()
-            self.assertIn("items", data)
-            self.assertIn("total", data)
+        res = self.client.get("/api/matches")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertIn("items", data)
+        self.assertIn("total", data)
 
     @patch("app.api.matches.get_db")
     @patch("app.core.security.get_db")
     def test_list_matches_empty(self, mock_sec_db, mock_api_db):
         session = FakeSession()
         session.matches = []
+        self.authenticate(session)
         mock_api_db.return_value = session
         mock_sec_db.return_value = session
-        with patch("app.core.security.get_current_user", return_value=DummyUser()):
-            res = self.client.get("/api/matches?case_id=999")
-            self.assertEqual(res.status_code, 200)
-            data = res.json()
-            self.assertEqual(data["total"], 0)
+        res = self.client.get("/api/matches?case_id=999")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["total"], 0)
 
     @patch("app.api.matches.get_db")
     @patch("app.core.security.get_db")
     def test_get_match_detail(self, mock_sec_db, mock_api_db):
-        mock_api_db.return_value = FakeSession()
-        mock_sec_db.return_value = FakeSession()
-        with patch("app.core.security.get_current_user", return_value=DummyUser()):
-            res = self.client.get("/api/matches/1")
-            self.assertEqual(res.status_code, 200)
-            data = res.json()
-            self.assertEqual(data["id"], 1)
-            self.assertEqual(data["status"], "PENDING_REVIEW")
-            self.assertIn("matching_factors", data)
-            self.assertIn("match_score", data)
-            self.assertIn("confidence", data)
+        session = self.authenticate()
+        mock_api_db.return_value = session
+        mock_sec_db.return_value = session
+        res = self.client.get("/api/matches/1")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["id"], 1)
+        self.assertEqual(data["status"], "PENDING_REVIEW")
+        self.assertIn("matching_factors", data)
+        self.assertIn("match_score", data)
+        self.assertIn("confidence", data)
 
     @patch("app.api.matches.get_db")
     @patch("app.core.security.get_db")
     def test_get_match_not_found(self, mock_sec_db, mock_api_db):
         session = FakeSession()
         session.matches = []
+        self.authenticate(session)
         mock_api_db.return_value = session
         mock_sec_db.return_value = session
-        with patch("app.core.security.get_current_user", return_value=DummyUser()):
-            res = self.client.get("/api/matches/999")
-            self.assertEqual(res.status_code, 404)
+        res = self.client.get("/api/matches/999")
+        self.assertEqual(res.status_code, 404)
 
     @patch("app.api.matches.get_db")
     @patch("app.core.security.get_db")
     def test_review_match_confirmed(self, mock_sec_db, mock_api_db):
-        mock_api_db.return_value = FakeSession()
-        mock_sec_db.return_value = FakeSession()
-        with patch("app.core.security.get_current_user", return_value=DummyUser()), \
-             patch("app.api.matches.neo4j_client.execute") as mock_neo4j:
+        session = self.authenticate()
+        mock_api_db.return_value = session
+        mock_sec_db.return_value = session
+        with patch("app.api.matches.neo4j_client.execute") as mock_neo4j:
             res = self.client.patch(
                 "/api/matches/1/review",
                 json={"status": "CONFIRMED"},
@@ -218,10 +193,10 @@ class EntityMatchingAPITests(unittest.TestCase):
     @patch("app.api.matches.get_db")
     @patch("app.core.security.get_db")
     def test_review_match_rejected(self, mock_sec_db, mock_api_db):
-        mock_api_db.return_value = FakeSession()
-        mock_sec_db.return_value = FakeSession()
-        with patch("app.core.security.get_current_user", return_value=DummyUser()), \
-             patch("app.api.matches.neo4j_client.execute"):
+        session = self.authenticate()
+        mock_api_db.return_value = session
+        mock_sec_db.return_value = session
+        with patch("app.api.matches.neo4j_client.execute"):
             res = self.client.patch(
                 "/api/matches/1/review",
                 json={"status": "REJECTED"},
@@ -233,36 +208,36 @@ class EntityMatchingAPITests(unittest.TestCase):
     @patch("app.api.matches.get_db")
     @patch("app.core.security.get_db")
     def test_review_match_invalid_status(self, mock_sec_db, mock_api_db):
-        mock_api_db.return_value = FakeSession()
-        mock_sec_db.return_value = FakeSession()
-        with patch("app.core.security.get_current_user", return_value=DummyUser()):
-            res = self.client.patch(
-                "/api/matches/1/review",
-                json={"status": "MERGED"},
-            )
-            self.assertEqual(res.status_code, 400)
+        session = self.authenticate()
+        mock_api_db.return_value = session
+        mock_sec_db.return_value = session
+        res = self.client.patch(
+            "/api/matches/1/review",
+            json={"status": "MERGED"},
+        )
+        self.assertEqual(res.status_code, 400)
 
     @patch("app.api.matches.get_db")
     @patch("app.core.security.get_db")
     def test_review_match_not_found(self, mock_sec_db, mock_api_db):
         session = FakeSession()
         session.matches = []
+        self.authenticate(session)
         mock_api_db.return_value = session
         mock_sec_db.return_value = session
-        with patch("app.core.security.get_current_user", return_value=DummyUser()):
-            res = self.client.patch(
-                "/api/matches/999/review",
-                json={"status": "CONFIRMED"},
-            )
-            self.assertEqual(res.status_code, 404)
+        res = self.client.patch(
+            "/api/matches/999/review",
+            json={"status": "CONFIRMED"},
+        )
+        self.assertEqual(res.status_code, 404)
 
     @patch("app.api.matches.get_db")
     @patch("app.core.security.get_db")
     def test_generate_matches_for_case(self, mock_sec_db, mock_api_db):
-        mock_api_db.return_value = FakeSession()
-        mock_sec_db.return_value = FakeSession()
-        with patch("app.core.security.get_current_user", return_value=DummyUser()), \
-             patch("app.api.matches.generate_case_entity_matches", return_value=[FakeMatch()]):
+        session = self.authenticate()
+        mock_api_db.return_value = session
+        mock_sec_db.return_value = session
+        with patch("app.api.matches.generate_case_entity_matches", return_value=[FakeMatch()]):
             res = self.client.post("/api/matches/cases/1/generate")
             self.assertEqual(res.status_code, 200)
             data = res.json()
@@ -272,11 +247,11 @@ class EntityMatchingAPITests(unittest.TestCase):
     @patch("app.api.matches.get_db")
     @patch("app.core.security.get_db")
     def test_generate_matches_case_not_found(self, mock_sec_db, mock_api_db):
-        mock_api_db.return_value = FakeSession()
-        mock_sec_db.return_value = FakeSession()
-        with patch("app.core.security.get_current_user", return_value=DummyUser()):
-            res = self.client.post("/api/matches/cases/999/generate")
-            self.assertEqual(res.status_code, 404)
+        session = self.authenticate()
+        mock_api_db.return_value = session
+        mock_sec_db.return_value = session
+        res = self.client.post("/api/matches/cases/999/generate")
+        self.assertEqual(res.status_code, 404)
 
     def test_unauthenticated_list_matches(self):
         res = self.client.get("/api/matches")

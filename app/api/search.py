@@ -4,9 +4,10 @@ from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user
 from app.db.models import Case, RawRecord, User
-from app.db.neo4j import neo4j_client
+from app.db.neo4j import neo4j_client, get_provenance_filter
 from app.db.postgres import get_db
 from app.services.risk import calculate_entity_risk
+from app.services.authorization import get_authorized_case_ids
 
 router = APIRouter(
     prefix="/search",
@@ -62,13 +63,23 @@ def search(
 
     results = []
 
+    authorized_case_ids = list(get_authorized_case_ids(db, user, "search:view"))
+    is_super_admin = (user.role == "SUPER_ADMIN")
+    if not authorized_case_ids and not is_super_admin:
+        return {"query": search_query, "results": [], "count": 0}
+    provenance_filter = get_provenance_filter()
+
     # 1. Search Neo4j Graph Entities
-    neo4j_cypher = """
+    neo4j_cypher = f"""
     MATCH (n)
     WHERE (
         n:Person OR n:Phone OR n:BankAccount OR n:Device OR n:Location OR
         n:FIR OR n:SocialAccount OR n:Transaction OR n:Merchant OR n:PoliceStation
     )
+    AND ($is_super_admin = true OR EXISTS {{
+        MATCH (n)-[r]-(rel_target)
+        WHERE {provenance_filter}
+    }})
     AND (
         toLower(coalesce(n.name, '')) CONTAINS toLower($search)
         OR toLower(coalesce(n.value, '')) CONTAINS toLower($search)
@@ -81,7 +92,8 @@ def search(
         OR toLower(coalesce(n.handle, '')) CONTAINS toLower($search)
         OR toLower(coalesce(n.transaction_id, '')) CONTAINS toLower($search)
     )
-    OPTIONAL MATCH (r:Record)--(n)
+    OPTIONAL MATCH (r:Record)-[rel]-(n)
+    WHERE $is_super_admin = true OR (rel.case_id IN $authorized_case_ids OR ANY(c IN rel.evidence_case_ids WHERE c IN $authorized_case_ids))
     WITH n,
          [l IN labels(n) WHERE l IN [
              'Person', 'Phone', 'BankAccount', 'Device', 'Location',
@@ -104,7 +116,13 @@ def search(
     LIMIT $limit
     """
 
-    neo4j_rows = neo4j_client.execute(neo4j_cypher, search=search_query, limit=limit)
+    neo4j_rows = neo4j_client.execute(
+        neo4j_cypher,
+        search=search_query,
+        limit=limit,
+        authorized_case_ids=authorized_case_ids,
+        is_super_admin=is_super_admin,
+    )
 
     for row in neo4j_rows:
         entity_id = row["entity_id"]
@@ -121,7 +139,11 @@ def search(
 
         if entity_type == "Person":
             try:
-                risk_res = calculate_entity_risk(entity_id)
+                risk_res = calculate_entity_risk(
+                    entity_id,
+                    authorized_case_ids=authorized_case_ids,
+                    is_super_admin=is_super_admin,
+                )
                 risk_level = risk_res.get("risk_level", "LOW")
                 risk_score = int(risk_res.get("risk_score", 0))
             except Exception:
@@ -142,16 +164,18 @@ def search(
         )
 
     # 2. Search PostgreSQL Cases
-    case_query = (
-        db.query(Case)
-        .filter(
-            (Case.case_number.ilike(f"%{search_query}%"))
-            | (Case.title.ilike(f"%{search_query}%"))
-            | (Case.description.ilike(f"%{search_query}%"))
-        )
-        .limit(limit)
-        .all()
+    case_query = db.query(Case).filter(
+        (Case.case_number.ilike(f"%{search_query}%"))
+        | (Case.title.ilike(f"%{search_query}%"))
+        | (Case.description.ilike(f"%{search_query}%"))
     )
+    if not is_super_admin:
+        if not authorized_case_ids:
+            case_query = []
+        else:
+            case_query = case_query.filter(Case.id.in_(authorized_case_ids)).limit(limit).all()
+    else:
+        case_query = case_query.limit(limit).all()
 
     if case_query:
         found_case_ids = [c.id for c in case_query]

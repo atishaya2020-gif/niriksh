@@ -6,6 +6,12 @@ from app.db.models import Alert, User
 from app.db.neo4j import neo4j_client
 from app.db.postgres import get_db
 from app.services.alert_service import generate_risk_alerts
+from app.services.authorization import (
+    get_authorized_case,
+    get_authorized_case_ids,
+    authorize_resource_case,
+    require_global_capability,
+)
 
 router = APIRouter(prefix="/alerts", tags=["Alerts"])
 
@@ -18,6 +24,11 @@ def list_alerts(
     user: User = Depends(get_current_user),
 ):
     query = db.query(Alert)
+
+    # Restrict alerts to authorized cases (no global leak)
+    if user.role != "SUPER_ADMIN":
+        authorized_ids = get_authorized_case_ids(db, user, "alert:view")
+        query = query.filter(Alert.case_id.in_(authorized_ids))
 
     if status:
         query = query.filter(Alert.status == status.upper())
@@ -65,6 +76,9 @@ def get_alert(
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
 
+    # Resolve owning case before returning the alert
+    authorize_resource_case(db, user, alert.case_id, "alert:view", "Alert")
+
     return {
         "success": True,
         "data": {
@@ -89,6 +103,11 @@ def generate_alerts(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    # This operation scans entities across all cases and creates alerts
+    # in multiple cases. Require the global alert:manage capability
+    # BEFORE any Neo4j query or alert creation side effect.
+    require_global_capability(user, "alert:manage")
+
     query = """
     MATCH (p:Person)
     OPTIONAL MATCH (p)-[r]-()
@@ -157,6 +176,9 @@ def update_alert_status(
 
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
+
+    # Resolve owning case and require alert:manage BEFORE mutation
+    get_authorized_case(db, user, alert.case_id, "alert:manage")
 
     alert.status = status
     db.commit()

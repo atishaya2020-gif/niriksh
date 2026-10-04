@@ -5,7 +5,11 @@ from typing import Any
 from app.db.neo4j import neo4j_client
 
 
-def calculate_entity_risk(entity_id: str) -> dict[str, Any]:
+def calculate_entity_risk(
+    entity_id: str,
+    authorized_case_ids: list[int] | None = None,
+    is_super_admin: bool = False,
+) -> dict[str, Any]:
     """
     Explainable investigative risk scoring.
 
@@ -17,18 +21,23 @@ def calculate_entity_risk(entity_id: str) -> dict[str, Any]:
     MATCH (e {entity_id: $entity_id})
 
     OPTIONAL MATCH (e)-[r]-()
+    WHERE $is_super_admin = true OR (r.case_id IN $authorized_case_ids OR ANY(c IN r.evidence_case_ids WHERE c IN $authorized_case_ids))
     WITH e, count(DISTINCT r) AS connections
 
-    OPTIONAL MATCH (e)-[]-(phone:Phone)
+    OPTIONAL MATCH (e)-[phone_rel]-(phone:Phone)
+    WHERE $is_super_admin = true OR (phone_rel.case_id IN $authorized_case_ids OR ANY(c IN phone_rel.evidence_case_ids WHERE c IN $authorized_case_ids))
     WITH e, connections, count(DISTINCT phone) AS phones
 
-    OPTIONAL MATCH (e)-[]-(device:Device)
+    OPTIONAL MATCH (e)-[device_rel]-(device:Device)
+    WHERE $is_super_admin = true OR (device_rel.case_id IN $authorized_case_ids OR ANY(c IN device_rel.evidence_case_ids WHERE c IN $authorized_case_ids))
     WITH e, connections, phones, count(DISTINCT device) AS devices
 
-    OPTIONAL MATCH (e)-[]-(account:BankAccount)
+    OPTIONAL MATCH (e)-[account_rel]-(account:BankAccount)
+    WHERE $is_super_admin = true OR (account_rel.case_id IN $authorized_case_ids OR ANY(c IN account_rel.evidence_case_ids WHERE c IN $authorized_case_ids))
     WITH e, connections, phones, devices, count(DISTINCT account) AS accounts
 
-    OPTIONAL MATCH (e)-[]-(record:Record)
+    OPTIONAL MATCH (e)-[record_rel]-(record:Record)
+    WHERE $is_super_admin = true OR (record_rel.case_id IN $authorized_case_ids OR ANY(c IN record_rel.evidence_case_ids WHERE c IN $authorized_case_ids))
     WITH e, connections, phones, devices, accounts,
          collect(DISTINCT record.case_id) AS case_ids,
          collect(DISTINCT record.fraud_flag) AS fraud_flags
@@ -45,7 +54,12 @@ def calculate_entity_risk(entity_id: str) -> dict[str, Any]:
         fraud_flags
     """
 
-    rows = neo4j_client.execute(query, entity_id=entity_id)
+    rows = neo4j_client.execute(
+        query,
+        entity_id=entity_id,
+        authorized_case_ids=authorized_case_ids or [],
+        is_super_admin=is_super_admin,
+    )
 
     if not rows:
         return {

@@ -3,9 +3,10 @@ from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user
 from app.db.models import Case, User
-from app.db.neo4j import neo4j_client
+from app.db.neo4j import neo4j_client, get_provenance_filter
 from app.db.postgres import get_db
 from app.services.risk import calculate_entity_risk
+from app.services.authorization import get_authorized_case
 
 
 router = APIRouter(
@@ -25,24 +26,18 @@ def get_case_network(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    # --------------------------------------------------------
-    # Verify case exists
-    # --------------------------------------------------------
-
-    case = db.get(Case, case_id)
-
-    if not case:
-        raise HTTPException(
-            status_code=404,
-            detail="Case not found",
-        )
+    # Authorize requested case
+    case = get_authorized_case(db, user, case_id, "network:view")
+    authorized_case_ids = [case_id]
+    is_super_admin = (user.role == "SUPER_ADMIN")
 
     # --------------------------------------------------------
     # Find primary people
     # --------------------------------------------------------
 
     people_query = """
-    MATCH (r:Record {case_id: $case_id})--(p:Person)
+    MATCH (r:Record {case_id: $case_id})-[rel:MENTIONS]->(p:Person)
+    WHERE ($is_super_admin = true OR (rel.case_id IN $authorized_case_ids OR ANY(c IN rel.evidence_case_ids WHERE c IN $authorized_case_ids)))
     WITH
         p,
         count(DISTINCT r) AS record_connections
@@ -59,6 +54,8 @@ def get_case_network(
         people_query,
         case_id=case_id,
         limit=limit,
+        authorized_case_ids=authorized_case_ids,
+        is_super_admin=is_super_admin
     )
 
     if not people_rows:
@@ -102,11 +99,12 @@ def get_case_network(
     # --------------------------------------------------------
     # Get bounded network
     # --------------------------------------------------------
-
-    network_query = """
+    provenance_filter = get_provenance_filter()
+    network_query = f"""
     MATCH (p:Person)-[r]-(other)
     WHERE p.entity_id IN $person_ids
       AND type(r) <> 'MATCHED_WITH'
+      AND ($is_super_admin = true OR {provenance_filter})
 
     RETURN
         p.entity_id AS source_id,
@@ -126,6 +124,8 @@ def get_case_network(
     network_rows = neo4j_client.execute(
         network_query,
         person_ids=person_ids,
+        authorized_case_ids=authorized_case_ids,
+        is_super_admin=is_super_admin
     )
 
     # --------------------------------------------------------
@@ -153,7 +153,9 @@ def get_case_network(
         try:
 
             risk_result = calculate_entity_risk(
-                person_id
+                person_id,
+                authorized_case_ids=authorized_case_ids,
+                is_super_admin=is_super_admin,
             )
 
             risk_level = risk_result.get(
@@ -352,42 +354,24 @@ def get_case_network(
 
 @router.get("/{case_id}/simulate")
 def simulate_disruption(
-
     case_id: int,
-
     target_entity_id: str = Query(...),
-
-    db: Session = Depends(
-        get_db
-    ),
-
-    user: User = Depends(
-        get_current_user
-    ),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ):
+    # Verify case and authorize
+    get_authorized_case(db, user, case_id, "network:view")
+    is_super_admin = (user.role == "SUPER_ADMIN")
+    authorized_case_ids = [case_id]
 
     # --------------------------------------------------------
-    # Verify case
+    # Get entity connection counts with provenance
     # --------------------------------------------------------
 
-    case = db.get(
-        Case,
-        case_id
-    )
-
-    if not case:
-
-        raise HTTPException(
-            status_code=404,
-            detail="Case not found",
-        )
-
-    # --------------------------------------------------------
-    # Get entity connection counts
-    # --------------------------------------------------------
-
-    query = """
-    MATCH (r:Record {case_id: $case_id})--(p:Person)
+    provenance_filter = get_provenance_filter()
+    query = f"""
+    MATCH (r:Record {{case_id: $case_id}})-[rel:MENTIONS]->(p:Person)
+    WHERE ($is_super_admin = true OR (rel.case_id IN $authorized_case_ids OR ANY(c IN rel.evidence_case_ids WHERE c IN $authorized_case_ids)))
 
     RETURN
         p.entity_id AS entity_id,
@@ -399,6 +383,8 @@ def simulate_disruption(
     rows = neo4j_client.execute(
         query,
         case_id=case_id,
+        authorized_case_ids=authorized_case_ids,
+        is_super_admin=is_super_admin
     )
 
     # --------------------------------------------------------

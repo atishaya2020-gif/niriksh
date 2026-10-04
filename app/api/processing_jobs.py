@@ -5,6 +5,11 @@ from app.core.security import get_current_user
 from app.db.models import PROCESSING_STATUSES, Case, ProcessingJob, User
 from app.db.postgres import get_db
 from app.services.processing_jobs import retry_job_graph, utcnow
+from app.services.authorization import (
+    get_authorized_case,
+    get_authorized_case_ids,
+    authorize_resource_case,
+)
 
 
 router = APIRouter(prefix="/processing-jobs", tags=["Processing"])
@@ -40,9 +45,8 @@ def start_processing_job(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    case = db.get(Case, case_id)
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
+    # Authorize BEFORE creating a job or triggering processing
+    get_authorized_case(db, user, case_id, "processing:start")
 
     existing = (
         db.query(ProcessingJob)
@@ -89,6 +93,10 @@ def retry_processing_job(
     job = db.get(ProcessingJob, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Processing job not found")
+
+    # Resolve owning case and require processing:retry BEFORE triggering work
+    get_authorized_case(db, user, job.case_id, "processing:retry")
+
     result = retry_job_graph(db, job)
     if not result.get("success"):
         raise HTTPException(status_code=409, detail=result.get("message") or "Unable to retry processing job")
@@ -108,6 +116,10 @@ def get_processing_job(
     job = db.get(ProcessingJob, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Processing job not found")
+
+    # Resolve owning case before returning job details
+    authorize_resource_case(db, user, job.case_id, "case:view", "Processing job")
+
     return {
         "success": True,
         "data": serialize_job(job),
@@ -121,9 +133,9 @@ def list_case_processing_jobs(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    case = db.get(Case, case_id)
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
+    # Authorize case access before returning jobs
+    get_authorized_case(db, user, case_id, "case:view")
+
     jobs = (
         db.query(ProcessingJob)
         .filter(ProcessingJob.case_id == case_id)

@@ -4,6 +4,10 @@ from sqlalchemy.orm import Session
 from app.core.security import get_current_user
 from app.db.models import RawRecord, User
 from app.db.postgres import get_db
+from app.services.authorization import (
+    get_authorized_case,
+    get_authorized_case_ids,
+)
 
 router = APIRouter(prefix="/records", tags=["Records"])
 
@@ -32,11 +36,18 @@ def list_records(
 ):
     query = db.query(RawRecord)
     if case_id is not None:
+        get_authorized_case(db, user, case_id, "case:view")
         query = query.filter(RawRecord.case_id == case_id)
+    else:
+        if user.role != "SUPER_ADMIN":
+            authorized_ids = get_authorized_case_ids(db, user, "case:view")
+            query = query.filter(RawRecord.case_id.in_(authorized_ids))
+
     if category:
         query = query.filter(RawRecord.category == category)
     if record_status:
         query = query.filter(RawRecord.payload["record_status"].astext == record_status)
+
     total = query.count()
     records = query.order_by(RawRecord.incident_datetime.desc(), RawRecord.id.desc()).offset((page - 1) * page_size).limit(page_size).all()
     return {"items": [serialize_record(record) for record in records], "total": total, "page": page, "page_size": page_size}
@@ -50,4 +61,8 @@ def get_record(record_id: str, case_id: int | None = None, db: Session = Depends
     record = query.first()
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
+
+    # Authorize owning case
+    get_authorized_case(db, user, record.case_id, "case:view")
+
     return serialize_record(record)

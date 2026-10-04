@@ -421,11 +421,45 @@ def import_csv_batch(rows: list[dict], case_id: int, batch_size: int = 200) -> d
     }
 
 
-def get_graph(case_id: int | None = None, entity_id: str | None = None, depth: int = 2):
+from sqlalchemy.orm import Session
+from app.db.models import User
+from app.services.authorization import get_authorized_case_ids, get_authorized_case
+from app.db.neo4j import neo4j_client, get_provenance_filter
+
+def get_graph(case_id: int | None = None, entity_id: str | None = None, depth: int = 2, db: Session | None = None, user: User | None = None):
+    authorized_case_ids = []
+
+    if user and db:
+        if user.role == "SUPER_ADMIN":
+            if case_id:
+                authorized_case_ids = [case_id]
+        else:
+            user_authorized = get_authorized_case_ids(db, user, "network:view")
+            if case_id:
+                if case_id in user_authorized:
+                    authorized_case_ids = [case_id]
+                else:
+                    return {"nodes": [], "edges": []}
+            else:
+                authorized_case_ids = list(user_authorized)
+    elif case_id:
+        # Internal / service callers without explicit user context
+        authorized_case_ids = [case_id]
+
+    if not authorized_case_ids and not (user and user.role == "SUPER_ADMIN"):
+        return {"nodes": [], "edges": []}
+
     if entity_id:
-        query = """
-        MATCH path=(center {entity_id:$entity_id})-[*0..4]-(node)
+        query = f"""
+        MATCH path=(center {{entity_id:$entity_id}})-[*0..4]-(node)
         WHERE length(path) <= $depth
+          AND (
+            $is_super_admin = true
+            OR (
+              length(path) > 0
+              AND ALL(rel IN relationships(path) WHERE rel.case_id IN $authorized_case_ids OR ANY(provenance_case_id IN coalesce(rel.evidence_case_ids, []) WHERE provenance_case_id IN $authorized_case_ids))
+            )
+          )
         WITH collect(DISTINCT center) + collect(DISTINCT node) AS graph_nodes,
              collect(DISTINCT relationships(path)) AS relationship_lists
         UNWIND graph_nodes AS n
@@ -433,21 +467,23 @@ def get_graph(case_id: int | None = None, entity_id: str | None = None, depth: i
         UNWIND relationship_lists AS relationship_list
         UNWIND relationship_list AS r
         RETURN
-          [n IN nodes | {id:n.entity_id, type:labels(n)[0], label:coalesce(n.name,n.value,n.entity_id), properties:properties(n)}] AS nodes,
-          collect(DISTINCT {id:elementId(r), source:startNode(r).entity_id, target:endNode(r).entity_id, type:type(r), properties:properties(r)}) AS edges
+          [n IN nodes | {{id:n.entity_id, type:labels(n)[0], label:coalesce(n.name,n.value,n.entity_id), properties:properties(n)}}] AS nodes,
+          collect(DISTINCT {{id:elementId(r), source:startNode(r).entity_id, target:endNode(r).entity_id, type:type(r), properties:properties(r)}}) AS edges
         """
-        rows = neo4j_client.execute(query, entity_id=entity_id, depth=depth)
+        rows = neo4j_client.execute(query, entity_id=entity_id, depth=depth, authorized_case_ids=authorized_case_ids, is_super_admin=(user.role == "SUPER_ADMIN" if user else False))
         return rows[0] if rows else {"nodes": [], "edges": []}
 
-    query = """
+    # Case-scoped query
+    provenance_filter = get_provenance_filter()
+    query = f"""
     MATCH (n)-[r]->(m)
-    WHERE ($case_id IS NULL OR n.case_id = $case_id OR m.case_id = $case_id OR r.case_id = $case_id)
+    WHERE ($is_super_admin = true OR {provenance_filter})
       AND type(r) <> 'MATCHED_WITH'
-    RETURN collect(DISTINCT {id:n.entity_id, type:labels(n)[0], label:coalesce(n.name,n.value,n.entity_id), properties:properties(n)}) +
-           collect(DISTINCT {id:m.entity_id, type:labels(m)[0], label:coalesce(m.name,m.value,m.entity_id), properties:properties(m)}) AS nodes,
-           collect(DISTINCT {id:elementId(r), source:n.entity_id, target:m.entity_id, type:type(r), properties:properties(r)}) AS edges
+    RETURN collect(DISTINCT {{id:n.entity_id, type:labels(n)[0], label:coalesce(n.name,n.value,n.entity_id), properties:properties(n)}}) +
+           collect(DISTINCT {{id:m.entity_id, type:labels(m)[0], label:coalesce(m.name,m.value,m.entity_id), properties:properties(m)}}) AS nodes,
+           collect(DISTINCT {{id:elementId(r), source:n.entity_id, target:m.entity_id, type:type(r), properties:properties(r)}}) AS edges
     """
-    rows = neo4j_client.execute(query, case_id=case_id)
+    rows = neo4j_client.execute(query, authorized_case_ids=authorized_case_ids, is_super_admin=(user.role == "SUPER_ADMIN" if user else False))
     if not rows:
         return {"nodes": [], "edges": []}
     result = rows[0]

@@ -18,18 +18,19 @@ def generate_case_entity_matches(db: Session, case_id: int) -> list[EntityMatch]
     Does NOT perform all-to-all comparisons. Prevents duplicate pairs.
     """
     query = """
-    MATCH (r:Record {case_id: $case_id})--(p:Person)
+    MATCH (r:Record {case_id: $case_id})-[r0:MENTIONS]->(p:Person)
     
     // Block 1: Shared phone
     OPTIONAL MATCH (p)-[:OWNS_PHONE]->(ph:Phone)<-[:OWNS_PHONE|CONTAINS_PHONE]-(p2:Person)
     WHERE p.entity_id < p2.entity_id
+      AND EXISTS { MATCH (p2)<-[:MENTIONS]-(r2:Record {case_id: $case_id}) }
 
     // Block 2: Shared device
-    OPTIONAL MATCH (p)-[:USES_DEVICE]->(d:Device)<-[:USES_DEVICE]-(p3:Person)
+    OPTIONAL MATCH (p)<-[:MENTIONS]-(r1:Record {case_id: $case_id})-[:USES_DEVICE]->(d:Device)<-[:USES_DEVICE]-(r2:Record {case_id: $case_id})-[:MENTIONS]->(p3:Person)
     WHERE p.entity_id < p3.entity_id
 
     // Block 3: Shared bank account
-    OPTIONAL MATCH (p)-[:USES_ACCOUNT]->(acc:BankAccount)<-[:USES_ACCOUNT]-(p4:Person)
+    OPTIONAL MATCH (p)<-[:MENTIONS]-(r3:Record {case_id: $case_id})-[:USES_ACCOUNT]->(acc:BankAccount)<-[:USES_ACCOUNT]-(r4:Record {case_id: $case_id})-[:MENTIONS]->(p4:Person)
     WHERE p.entity_id < p4.entity_id
 
     WITH p, 
@@ -75,12 +76,19 @@ def generate_case_entity_matches(db: Session, case_id: int) -> list[EntityMatch]
 
         # Evaluate signals between source and candidate
         signal_query = """
-        MATCH (s:Person {entity_id: $source_id}), (c:Person {entity_id: $candidate_id})
+        MATCH (s:Person {entity_id: $source_id})<-[:MENTIONS]-(r1:Record {case_id: $case_id})
+        MATCH (c:Person {entity_id: $candidate_id})<-[:MENTIONS]-(r2:Record {case_id: $case_id})
         
-        OPTIONAL MATCH (s)-[:OWNS_PHONE]->(ph:Phone)<-[:OWNS_PHONE|CONTAINS_PHONE]-(c)
-        OPTIONAL MATCH (s)-[:USES_DEVICE]->(d:Device)<-[:USES_DEVICE]-(c)
-        OPTIONAL MATCH (s)-[:USES_ACCOUNT]->(acc:BankAccount)<-[:USES_ACCOUNT]-(c)
-        OPTIONAL MATCH (s)-[:ASSOCIATED_WITH]->(l:Location)<-[:ASSOCIATED_WITH]-(c)
+        OPTIONAL MATCH (s)<-[sp_mention:MENTIONS]-(spr:Record {case_id: $case_id})-[sp_record_rel:CONTAINS_PHONE]->(ph:Phone)<-[cp_record_rel:CONTAINS_PHONE]-(cpr:Record {case_id: $case_id})-[cp_mention:MENTIONS]->(c)
+        WHERE (sp_mention.case_id = $case_id OR $case_id IN coalesce(sp_mention.evidence_case_ids, []))
+          AND (sp_record_rel.case_id = $case_id OR $case_id IN coalesce(sp_record_rel.evidence_case_ids, []))
+          AND (cp_record_rel.case_id = $case_id OR $case_id IN coalesce(cp_record_rel.evidence_case_ids, []))
+          AND (cp_mention.case_id = $case_id OR $case_id IN coalesce(cp_mention.evidence_case_ids, []))
+        OPTIONAL MATCH (s)<-[:MENTIONS]-(r3:Record {case_id: $case_id})-[:USES_DEVICE]->(d:Device)<-[:USES_DEVICE]-(r4:Record {case_id: $case_id})-[:MENTIONS]->(c)
+        OPTIONAL MATCH (s)<-[:MENTIONS]-(r5:Record {case_id: $case_id})-[:USES_ACCOUNT]->(acc:BankAccount)<-[:USES_ACCOUNT]-(r6:Record {case_id: $case_id})-[:MENTIONS]->(c)
+        OPTIONAL MATCH (s)-[sl:ASSOCIATED_WITH]-(l:Location)-[cl:ASSOCIATED_WITH]-(c)
+        WHERE (sl.case_id = $case_id OR $case_id IN coalesce(sl.evidence_case_ids, []))
+          AND (cl.case_id = $case_id OR $case_id IN coalesce(cl.evidence_case_ids, []))
         
         RETURN 
             count(DISTINCT ph) AS shared_phones,
@@ -91,7 +99,7 @@ def generate_case_entity_matches(db: Session, case_id: int) -> list[EntityMatch]
             c.name AS candidate_name
         """
         signal_rows = neo4j_client.execute(
-            signal_query, source_id=source_id, candidate_id=candidate_id
+            signal_query, source_id=source_id, candidate_id=candidate_id, case_id=case_id
         )
 
         if not signal_rows:

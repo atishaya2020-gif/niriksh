@@ -10,6 +10,7 @@ from app.db.models import Case, ProcessingJob, User
 from app.db.postgres import SessionLocal, get_db
 from app.services.ingestion import import_csv
 from app.services.processing_jobs import utcnow
+from app.services.authorization import get_authorized_case
 
 
 router = APIRouter(tags=["Ingestion"])
@@ -28,6 +29,9 @@ async def upload_csv(
     case = db.get(Case, case_id)
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
+
+    # Authorize ingestion: inaccessible case -> 404, viewable but lacking ingest -> 403
+    get_authorized_case(db, user, case_id, "case:ingest")
 
     contents = await file.read()
 

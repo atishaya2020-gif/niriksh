@@ -1,8 +1,38 @@
 from datetime import datetime
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func, Index, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.postgres import Base
+
+
+CAPABILITIES = [
+    "case:view",
+    "case:create",
+    "case:update",
+    "case:ingest",
+    "evidence:create",
+    "evidence:verify",
+    "alert:view",
+    "alert:manage",
+    "match:view",
+    "match:review",
+    "processing:start",
+    "processing:retry",
+    "network:view",
+    "analytics:view",
+    "search:view",
+    "cross_case:correlate",
+    "admin:manage_users",
+    "admin:manage_roles",
+    "admin:manage_grants",
+    "admin:manage_cases",
+]
+
+SAFE_CROSS_STATE_CAPABILITIES = [
+    "case:view",
+    "network:view",
+    "search:view",
+]
 
 
 class User(Base):
@@ -222,3 +252,89 @@ class AccessRequest(Base):
         DateTime(timezone=True),
         server_default=func.now()
     )
+
+
+class Jurisdiction(Base):
+    __tablename__ = "jurisdictions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    code: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class UserJurisdiction(Base):
+    __tablename__ = "user_jurisdictions"
+    __table_args__ = (UniqueConstraint("user_id", "jurisdiction_id", name="uq_user_jurisdictions_user_jurisdiction"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    jurisdiction_id: Mapped[int] = mapped_column(ForeignKey("jurisdictions.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CaseJurisdiction(Base):
+    __tablename__ = "case_jurisdictions"
+    __table_args__ = (UniqueConstraint("case_id", "jurisdiction_id", name="uq_case_jurisdictions_case_jurisdiction"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    case_id: Mapped[int] = mapped_column(ForeignKey("cases.id", ondelete="CASCADE"), index=True)
+    jurisdiction_id: Mapped[int] = mapped_column(ForeignKey("jurisdictions.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CaseGrant(Base):
+    __tablename__ = "case_grants"
+    __table_args__ = (
+        Index(
+            "uq_active_user_case_capability",
+            "user_id",
+            "case_id",
+            "capability",
+            unique=True,
+            postgresql_where=text("revoked_at IS NULL"),
+            sqlite_where=text("revoked_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    case_id: Mapped[int] = mapped_column(ForeignKey("cases.id", ondelete="CASCADE"), index=True)
+    capability: Mapped[str] = mapped_column(String(100), index=True)
+    granted_by: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class CrossStateGrant(Base):
+    __tablename__ = "cross_state_grants"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    requesting_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    target_jurisdiction_id: Mapped[int] = mapped_column(ForeignKey("jurisdictions.id", ondelete="CASCADE"), index=True)
+    capability: Mapped[str] = mapped_column(String(100), index=True)
+    justification: Mapped[str] = mapped_column(Text())
+    status: Mapped[str] = mapped_column(String(50), default="PENDING", index=True)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    approved_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    actor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(100), index=True)
+    target_type: Mapped[str | None] = mapped_column(String(100), index=True, nullable=True)
+    target_id: Mapped[str | None] = mapped_column(String(255), index=True, nullable=True)
+    case_id: Mapped[int | None] = mapped_column(ForeignKey("cases.id"), nullable=True, index=True)
+    outcome: Mapped[str] = mapped_column(String(50), index=True)
+    metadata_json: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
+    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
