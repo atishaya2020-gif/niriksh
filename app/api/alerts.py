@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user
+from app.core.roles import normalize_role
 from app.db.models import Alert, User
 from app.db.neo4j import neo4j_client
 from app.db.postgres import get_db
@@ -26,7 +27,7 @@ def list_alerts(
     query = db.query(Alert)
 
     # Restrict alerts to authorized cases (no global leak)
-    if user.role != "SUPER_ADMIN":
+    if normalize_role(user.role) != "SUPER_ADMIN":
         authorized_ids = get_authorized_case_ids(db, user, "alert:view")
         query = query.filter(Alert.case_id.in_(authorized_ids))
 

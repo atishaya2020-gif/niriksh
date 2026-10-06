@@ -30,3 +30,21 @@ ROLE_CAPABILITY_CEILINGS = {
         "case:view", "search:view"
     }
 }
+
+VALID_ROLES = set(ROLE_CAPABILITY_CEILINGS.keys())
+UNKNOWN_ROLE = "UNKNOWN"
+
+
+def normalize_role(raw_role) -> str:
+    """Normalize a role string to its canonical uppercase form.
+
+    - "admin" -> "ADMIN"
+    - " super_admin " -> "SUPER_ADMIN"
+    - unknown or empty -> "UNKNOWN" (no capabilities)
+    """
+    if raw_role is None:
+        return UNKNOWN_ROLE
+    normalized = str(raw_role).strip().upper()
+    if normalized in ROLE_CAPABILITY_CEILINGS:
+        return normalized
+    return UNKNOWN_ROLE

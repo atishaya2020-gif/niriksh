@@ -5,6 +5,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pwdlib import PasswordHash
 from sqlalchemy.orm import Session
 from app.core.config import settings
+from app.core.roles import normalize_role
 from app.db.models import User
 from app.db.postgres import get_db
 
@@ -22,7 +23,8 @@ def verify_password(password: str, hashed: str) -> bool:
 
 def create_access_token(user: User) -> str:
     expires = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_expire_minutes)
-    payload = {"sub": str(user.id), "username": user.username, "role": user.role, "exp": expires}
+    role = normalize_role(user.role)
+    payload = {"sub": str(user.id), "username": user.username, "role": role, "exp": expires}
     return jwt.encode(payload, settings.secret_key, algorithm="HS256")
 
 

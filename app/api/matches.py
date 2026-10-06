@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user
+from app.core.roles import normalize_role
 from app.db.models import (
     MATCH_STATUSES,
     Case,
@@ -34,7 +35,7 @@ def list_matches(
     query = db.query(EntityMatch)
 
     # Restrict matches to authorized cases (no global leak)
-    if user.role != "SUPER_ADMIN":
+    if normalize_role(user.role) != "SUPER_ADMIN":
         authorized_ids = get_authorized_case_ids(db, user, "match:view")
         query = query.filter(EntityMatch.case_id.in_(authorized_ids))
 

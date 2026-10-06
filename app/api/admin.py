@@ -10,6 +10,8 @@ from app.core.security import (
     get_current_user,
 )
 
+from app.core.roles import normalize_role, VALID_ROLES
+
 from app.db.models import User
 
 from app.db.postgres import (
@@ -27,13 +29,11 @@ def require_admin(
     user: User
 ):
 
-    role = str(
-        user.role or ""
-    ).lower()
+    role = normalize_role(user.role)
 
     if role not in {
-        "admin",
-        "super_admin",
+        "ADMIN",
+        "SUPER_ADMIN",
     }:
         raise HTTPException(
             status_code=403,
@@ -212,20 +212,15 @@ def update_user_role(
             detail="User not found.",
         )
 
-    role = str(
-        payload.get(
-            "role",
-            ""
-        )
-    ).strip()
+    role = normalize_role(payload.get("role", ""))
 
-    if not role:
+    if role not in VALID_ROLES:
         raise HTTPException(
             status_code=400,
-            detail="Role is required.",
+            detail="Invalid role.",
         )
 
-    target.role = role.lower()
+    target.role = role
 
     db.commit()
     db.refresh(target)

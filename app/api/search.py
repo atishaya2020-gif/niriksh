@@ -3,6 +3,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user
+from app.core.roles import normalize_role
 from app.db.models import Case, RawRecord, User
 from app.db.neo4j import neo4j_client, get_provenance_filter
 from app.db.postgres import get_db
@@ -64,7 +65,7 @@ def search(
     results = []
 
     authorized_case_ids = list(get_authorized_case_ids(db, user, "search:view"))
-    is_super_admin = (user.role == "SUPER_ADMIN")
+    is_super_admin = (normalize_role(user.role) == "SUPER_ADMIN")
     if not authorized_case_ids and not is_super_admin:
         return {"query": search_query, "results": [], "count": 0}
     provenance_filter = get_provenance_filter()

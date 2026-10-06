@@ -6,7 +6,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select, and_, or_
 from sqlalchemy.orm import Session
 
-from app.core.roles import ROLE_CAPABILITY_CEILINGS
+from app.core.roles import ROLE_CAPABILITY_CEILINGS, normalize_role
 from app.db.models import (
     User, Case, CaseGrant, CrossStateGrant, Jurisdiction,
     UserJurisdiction, CaseJurisdiction, CAPABILITIES, SAFE_CROSS_STATE_CAPABILITIES
@@ -35,12 +35,14 @@ class AuthorizedScope:
     cross_case_permitted: bool = False
 
 def build_authorized_scope(session: Session, user: User) -> AuthorizedScope:
-    is_super_admin = user.role == "SUPER_ADMIN"
+    # Normalize role at the authorization boundary
+    role = normalize_role(user.role)
+    is_super_admin = role == "SUPER_ADMIN"
 
     # 1. Resolve basic info
     scope = AuthorizedScope(
         user_id=user.id,
-        role=user.role,
+        role=role,
         is_super_admin=is_super_admin
     )
 
@@ -70,14 +72,17 @@ def build_authorized_scope(session: Session, user: User) -> AuthorizedScope:
     scope.cross_state_jurisdiction_ids = set(cross_state)
 
     # 4. Role ceiling capabilities (global)
-    scope.global_capabilities = ROLE_CAPABILITY_CEILINGS.get(user.role, set())
+    scope.global_capabilities = ROLE_CAPABILITY_CEILINGS.get(role, set())
 
     return scope
 
 def get_case_capabilities(session: Session, user: User, case_id: int) -> set[str]:
+    # Normalize role at the authorization boundary
+    role = normalize_role(user.role)
+
     # 1. Role Ceiling
-    ceiling = ROLE_CAPABILITY_CEILINGS.get(user.role, set())
-    if user.role == "SUPER_ADMIN":
+    ceiling = ROLE_CAPABILITY_CEILINGS.get(role, set())
+    if role == "SUPER_ADMIN":
         ceiling = set(CAPABILITIES)
 
     # 2. Jurisdiction Inheritance (baseline)
@@ -125,7 +130,7 @@ def get_case_capabilities(session: Session, user: User, case_id: int) -> set[str
     return effective.intersection(ceiling)
 
 def has_case_capability(session: Session, user: User, case_id: int, capability: str) -> bool:
-    if user.role == "SUPER_ADMIN":
+    if normalize_role(user.role) == "SUPER_ADMIN":
         return True
     return capability in get_case_capabilities(session, user, case_id)
 
@@ -164,9 +169,10 @@ def authorize_resource_case(
 
 
 def has_global_capability(user: User, capability: str) -> bool:
-    if user.role == "SUPER_ADMIN":
+    role = normalize_role(user.role)
+    if role == "SUPER_ADMIN":
         return True
-    return capability in ROLE_CAPABILITY_CEILINGS.get(user.role, set())
+    return capability in ROLE_CAPABILITY_CEILINGS.get(role, set())
 
 def require_global_capability(user: User, capability: str):
     if not has_global_capability(user, capability):
@@ -178,12 +184,16 @@ def require_global_capability(user: User, capability: str):
 
 
 def can_correlate_cross_case(session: Session, user: User) -> bool:
-    if user.role == "SUPER_ADMIN":
+    role = normalize_role(user.role)
+    if role == "SUPER_ADMIN":
         return True
-    return "cross_case:correlate" in ROLE_CAPABILITY_CEILINGS.get(user.role, set())
+    return "cross_case:correlate" in ROLE_CAPABILITY_CEILINGS.get(role, set())
 
 def get_authorized_case_ids(session: Session, user: User, capability: str) -> set[int]:
-    if user.role == "SUPER_ADMIN":
+    # Normalize role at the authorization boundary
+    role = normalize_role(user.role)
+
+    if role == "SUPER_ADMIN":
         # For super admin, we return None to indicate "all" in our filters.
         # But for now, returning a sentinel might work.
         return set() # Caller should check is_super_admin
@@ -232,7 +242,7 @@ def get_authorized_case_ids(session: Session, user: User, capability: str) -> se
     authorized_case_ids.update(grant_case_ids)
 
     # 3. Restrict by Role Ceiling
-    ceiling = ROLE_CAPABILITY_CEILINGS.get(user.role, set())
+    ceiling = ROLE_CAPABILITY_CEILINGS.get(role, set())
     if capability not in ceiling:
         return set()
 

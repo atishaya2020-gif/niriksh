@@ -8,6 +8,7 @@ from app.services.authorization import (
     get_authorized_case,
     get_authorized_case_ids,
 )
+from app.core.roles import normalize_role
 
 router = APIRouter(prefix="/records", tags=["Records"])
 
@@ -39,7 +40,7 @@ def list_records(
         get_authorized_case(db, user, case_id, "case:view")
         query = query.filter(RawRecord.case_id == case_id)
     else:
-        if user.role != "SUPER_ADMIN":
+        if normalize_role(user.role) != "SUPER_ADMIN":
             authorized_ids = get_authorized_case_ids(db, user, "case:view")
             query = query.filter(RawRecord.case_id.in_(authorized_ids))
 

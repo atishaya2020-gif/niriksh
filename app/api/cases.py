@@ -12,6 +12,7 @@ from app.services.authorization import (
     require_case_capability,
     get_authorized_case_ids,
 )
+from app.core.roles import normalize_role
 
 
 router = APIRouter(
@@ -45,7 +46,7 @@ def list_cases(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    if user.role == "SUPER_ADMIN":
+    if normalize_role(user.role) == "SUPER_ADMIN":
         return db.query(Case).order_by(Case.id.desc()).all()
 
     authorized_ids = get_authorized_case_ids(db, user, "case:view")

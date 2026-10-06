@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user
+from app.core.roles import normalize_role
 from app.db.models import Case, User
 from app.db.neo4j import neo4j_client, get_provenance_filter
 from app.db.postgres import get_db
@@ -29,7 +30,7 @@ def get_case_network(
     # Authorize requested case
     case = get_authorized_case(db, user, case_id, "network:view")
     authorized_case_ids = [case_id]
-    is_super_admin = (user.role == "SUPER_ADMIN")
+    is_super_admin = (normalize_role(user.role) == "SUPER_ADMIN")
 
     # --------------------------------------------------------
     # Find primary people
@@ -361,7 +362,7 @@ def simulate_disruption(
 ):
     # Verify case and authorize
     get_authorized_case(db, user, case_id, "network:view")
-    is_super_admin = (user.role == "SUPER_ADMIN")
+    is_super_admin = (normalize_role(user.role) == "SUPER_ADMIN")
     authorized_case_ids = [case_id]
 
     # --------------------------------------------------------

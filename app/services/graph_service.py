@@ -422,6 +422,7 @@ def import_csv_batch(rows: list[dict], case_id: int, batch_size: int = 200) -> d
 
 
 from sqlalchemy.orm import Session
+from app.core.roles import normalize_role
 from app.db.models import User
 from app.services.authorization import get_authorized_case_ids, get_authorized_case
 from app.db.neo4j import neo4j_client, get_provenance_filter
@@ -430,7 +431,7 @@ def get_graph(case_id: int | None = None, entity_id: str | None = None, depth: i
     authorized_case_ids = []
 
     if user and db:
-        if user.role == "SUPER_ADMIN":
+        if normalize_role(user.role) == "SUPER_ADMIN":
             if case_id:
                 authorized_case_ids = [case_id]
         else:
@@ -446,7 +447,7 @@ def get_graph(case_id: int | None = None, entity_id: str | None = None, depth: i
         # Internal / service callers without explicit user context
         authorized_case_ids = [case_id]
 
-    if not authorized_case_ids and not (user and user.role == "SUPER_ADMIN"):
+    if not authorized_case_ids and not (user and normalize_role(user.role) == "SUPER_ADMIN"):
         return {"nodes": [], "edges": []}
 
     if entity_id:
@@ -470,7 +471,7 @@ def get_graph(case_id: int | None = None, entity_id: str | None = None, depth: i
           [n IN nodes | {{id:n.entity_id, type:labels(n)[0], label:coalesce(n.name,n.value,n.entity_id), properties:properties(n)}}] AS nodes,
           collect(DISTINCT {{id:elementId(r), source:startNode(r).entity_id, target:endNode(r).entity_id, type:type(r), properties:properties(r)}}) AS edges
         """
-        rows = neo4j_client.execute(query, entity_id=entity_id, depth=depth, authorized_case_ids=authorized_case_ids, is_super_admin=(user.role == "SUPER_ADMIN" if user else False))
+        rows = neo4j_client.execute(query, entity_id=entity_id, depth=depth, authorized_case_ids=authorized_case_ids, is_super_admin=(normalize_role(user.role) == "SUPER_ADMIN" if user else False))
         return rows[0] if rows else {"nodes": [], "edges": []}
 
     # Case-scoped query
@@ -483,7 +484,7 @@ def get_graph(case_id: int | None = None, entity_id: str | None = None, depth: i
            collect(DISTINCT {{id:m.entity_id, type:labels(m)[0], label:coalesce(m.name,m.value,m.entity_id), properties:properties(m)}}) AS nodes,
            collect(DISTINCT {{id:elementId(r), source:n.entity_id, target:m.entity_id, type:type(r), properties:properties(r)}}) AS edges
     """
-    rows = neo4j_client.execute(query, authorized_case_ids=authorized_case_ids, is_super_admin=(user.role == "SUPER_ADMIN" if user else False))
+    rows = neo4j_client.execute(query, authorized_case_ids=authorized_case_ids, is_super_admin=(normalize_role(user.role) == "SUPER_ADMIN" if user else False))
     if not rows:
         return {"nodes": [], "edges": []}
     result = rows[0]

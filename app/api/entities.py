@@ -18,6 +18,7 @@ router = APIRouter(
 # Entity Search
 # ============================================================
 
+from app.core.roles import normalize_role
 from app.services.authorization import get_authorized_case_ids
 from app.db.neo4j import get_provenance_filter
 
@@ -30,7 +31,7 @@ def list_entities(
     db: Session = Depends(get_db)
 ):
     authorized_case_ids = list(get_authorized_case_ids(db, user, "network:view"))
-    is_super_admin = (user.role == "SUPER_ADMIN")
+    is_super_admin = (normalize_role(user.role) == "SUPER_ADMIN")
 
     if not authorized_case_ids and not is_super_admin:
         return []
@@ -80,7 +81,7 @@ def get_entity(
     # --------------------------------------------------------
 
     authorized_case_ids = list(get_authorized_case_ids(db, user, "network:view"))
-    is_super_admin = (user.role == "SUPER_ADMIN")
+    is_super_admin = (normalize_role(user.role) == "SUPER_ADMIN")
     provenance_filter = get_provenance_filter()
 
     query = f"""
@@ -389,7 +390,7 @@ def entity_connections(
     user: User = Depends(get_current_user),
 ):
     authorized_case_ids = list(get_authorized_case_ids(db, user, "network:view"))
-    is_super_admin = (user.role == "SUPER_ADMIN")
+    is_super_admin = (normalize_role(user.role) == "SUPER_ADMIN")
     if not authorized_case_ids and not is_super_admin:
         return []
     provenance_filter = get_provenance_filter()
@@ -429,7 +430,7 @@ def entity_timeline(
     user: User = Depends(get_current_user),
 ):
     authorized_case_ids = list(get_authorized_case_ids(db, user, "network:view"))
-    is_super_admin = (user.role == "SUPER_ADMIN")
+    is_super_admin = (normalize_role(user.role) == "SUPER_ADMIN")
     if not authorized_case_ids and not is_super_admin:
         return []
     provenance_filter = get_provenance_filter()

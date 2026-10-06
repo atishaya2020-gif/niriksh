@@ -10,6 +10,8 @@ from app.core.security import (
     get_current_user,
 )
 
+from app.core.roles import normalize_role
+
 from app.db.models import (
     AccessRequest,
     User,
@@ -140,11 +142,9 @@ def list_access_requests(
     ),
 ):
 
-    if str(
-        user.role
-    ).lower() not in {
-        "admin",
-        "super_admin",
+    if normalize_role(user.role) not in {
+        "ADMIN",
+        "SUPER_ADMIN",
     }:
 
         raise HTTPException(
@@ -219,11 +219,9 @@ def update_access_request(
     ),
 ):
 
-    if str(
-        user.role
-    ).lower() not in {
-        "admin",
-        "super_admin",
+    if normalize_role(user.role) not in {
+        "ADMIN",
+        "SUPER_ADMIN",
     }:
 
         raise HTTPException(

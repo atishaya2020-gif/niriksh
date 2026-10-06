@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.roles import normalize_role
 from app.core.security import (
     create_access_token,
     get_current_user,
@@ -81,6 +82,11 @@ def seed_admin(db: Session):
     )
 
     if existing_admin:
+        # Safely normalize existing seeded admin role to canonical uppercase form
+        canonical_role = normalize_role(existing_admin.role)
+        if canonical_role != existing_admin.role:
+            existing_admin.role = canonical_role
+            db.commit()
         return
 
     db.add(
@@ -89,7 +95,7 @@ def seed_admin(db: Session):
             password_hash=hash_password(
                 settings.admin_password
             ),
-            role="admin",
+            role="ADMIN",
         )
     )
 

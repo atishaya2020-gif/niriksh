@@ -1,4 +1,6 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
+
+from app.core.roles import normalize_role
 
 
 class LoginRequest(BaseModel):
@@ -16,3 +18,8 @@ class UserResponse(BaseModel):
     id: int
     username: str
     role: str
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def _normalize_role(cls, value):
+        return normalize_role(value)
